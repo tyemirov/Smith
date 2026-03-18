@@ -1,11 +1,11 @@
 ---
-name: "GitRelease"
+name: "Git Release"
 description: "Use when preparing and cutting a release on the repository default branch: verify there are no open PRs into the default branch, refresh it with gix, run release validation such as make ci, generate release notes with gix message changelog, choose the next semver tag, update CHANGELOG.md, commit the changelog, and publish the tag with gix release."
 ---
 
-# GitRelease Skill
+# Git Release Skill
 
-Use `$GitRelease` when the user wants Codex to prepare and cut a release from the repository default branch.
+Use `$Git Release` when the user wants Codex to prepare and cut a release from the repository default branch.
 
 ## Preconditions
 

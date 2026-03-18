@@ -1,11 +1,11 @@
 ---
-name: "GitCommit"
+name: "Git Commit"
 description: "Turn the current Git worktree into a commit. Use when Codex should inspect the full set of introduced changes relative to the previous commit, draft a commit message with `gix message commit`, commit all tracked and untracked changes, and push when the repository has a clear remote target. Trigger for requests like \"commit this\", \"write a commit message and commit everything\", or \"commit and push the current changes.\""
 ---
 
-# GitCommit Skill
+# Git Commit Skill
 
-Use `$GitCommit` when the user wants a diff-based commit message, a full-tree commit, and an optional push.
+Use `$Git Commit` when the user wants a diff-based commit message, a full-tree commit, and an optional push.
 
 ## Preconditions
 
