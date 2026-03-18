@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitCommit"
+  short_description: "Draft, commit, and push Git changes"
+  default_prompt: "Use $GitCommit to write a diff-based commit message, commit all current changes, and push if the branch has a clear remote target."

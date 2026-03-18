@@ -14,11 +14,13 @@ The installer symlinks each custom skill from this repository into
 
 Skills:
 
+- `gitcommit`
+- `gitrelease`
 - `mediaops`
 
 Notes:
 
-- The repo only keeps the user-specific skill content.
+- The repo only keeps the user-specific skills I authored.
 - Secret-bearing local environment files are not tracked. See
   `mediaops/.env.example` for the expected variables.
 - `mediaops/bin/mediaops` is a small wrapper. The compiled runtime is cached under

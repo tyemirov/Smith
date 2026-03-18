@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Release"
+  short_description: "Prepare and cut default-branch releases"
+  default_prompt: "Use $GitRelease to verify release readiness, update CHANGELOG.md, choose the next semver tag, and publish the release."
