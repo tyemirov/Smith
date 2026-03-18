@@ -12,6 +12,8 @@ The installer symlinks each custom skill from this repository into
 `~/.codex/skills`. Use `./install-skills.sh --help` for options such as
 `--codex-home`, `--dry-run`, and `--force`.
 
+Portable prompt versions for Claude and Gemini live under `portable/`.
+
 Skills:
 
 - `Git Commit`
