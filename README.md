@@ -20,6 +20,16 @@ Skills:
 - `Git Release`
 - `mediaops`
 
+Execution metadata:
+
+- `agents/openai.yaml` is UI metadata for skill lists and default prompts.
+- `agents/runtime.yaml` is a repo-local convention for execution routing when a
+  host supports subagents with explicit `model` and `reasoning_effort`
+  controls.
+- Routing files should distinguish `fork-safe` steps from `same-worktree`
+  steps so Git mutations stay in the live repository when a host runs
+  subagents in isolated workspaces.
+
 Notes:
 
 - The repo only keeps the user-specific skills I authored.

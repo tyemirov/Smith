@@ -7,6 +7,15 @@ description: "Turn the current Git worktree into a commit. Use when Codex should
 
 Use `$Git Commit` when the user wants a diff-based commit message, a full-tree commit, and an optional push.
 
+## Runtime Routing
+
+If the host supports subagents with explicit `model` and `reasoning_effort`, read `agents/runtime.yaml` before running this skill.
+
+- Keep the controller in the main thread responsible for user communication, live-worktree verification, and final reporting.
+- Delegate only steps whose `workspace` requirement the host can satisfy.
+- In hosts where subagents run in forked workspaces, only delegate `fork-safe` steps. Run `same-worktree` steps such as staging, committing, and pushing inline in the controller.
+- If subagents or model controls are unavailable, run the full workflow inline and preserve the same guardrails.
+
 ## Preconditions
 
 - Require `git` and `gix`.

@@ -11,6 +11,26 @@ default branch, ensure there are no open PRs targeting it, refresh that branch,
 run release validation, update `CHANGELOG.md`, create a release commit, and then
 publish the tag with `gix release`.
 
+## Optional Subagent Routing
+
+If the platform supports subagents with explicit model selection, use this
+routing:
+
+- `release-preflight`: `worker`, `gpt-5.3-codex-spark`, `low`, `fork-safe`.
+  Resolve the default branch, inspect open PRs, confirm worktree cleanliness,
+  identify the release validation command, and find the latest version tag.
+  Re-verify blocking facts in the live worktree before continuing.
+- `release-versioning`: `worker`, `gpt-5.4-mini`, `medium`, `fork-safe`.
+  Choose the next semver version from validated facts and provide the bump
+  rationale.
+- `release-execution`: `worker`, `gpt-5.3-codex-spark`, `medium`,
+  `same-worktree`. Update `CHANGELOG.md`, commit, push, and run `gix release`.
+  If the platform cannot guarantee same-worktree execution, keep this step in
+  the main thread.
+
+If the platform lacks subagents or explicit model controls, run the whole
+workflow inline.
+
 ## Preconditions
 
 - Require `gh`, `git`, `gix`, and the repository's standard build tooling.
