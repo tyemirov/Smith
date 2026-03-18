@@ -14,8 +14,8 @@ The installer symlinks each custom skill from this repository into
 
 Skills:
 
-- `gitcommit`
-- `gitrelease`
+- `Git Commit`
+- `Git Release`
 - `mediaops`
 
 Notes:
