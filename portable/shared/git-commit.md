@@ -11,6 +11,21 @@ generate a commit message from the staged diff with `gix`, commit the full
 tracked and untracked change set, and push only when the target branch and
 remote are unambiguous.
 
+## Optional Subagent Routing
+
+If the platform supports subagents with explicit model selection, use this
+routing:
+
+- `commit-preflight`: `worker`, `gpt-5.3-codex-spark`, `low`, `fork-safe`.
+  Inspect repository state and stop conditions before any mutation. Re-verify
+  critical facts in the live worktree before staging or committing.
+- `commit-execution`: `worker`, `gpt-5.3-codex-spark`, `low`,
+  `same-worktree`. Stage, draft with `gix`, commit, and push. If the platform
+  cannot guarantee same-worktree execution, keep this step in the main thread.
+
+If the platform lacks subagents or explicit model controls, run the whole
+workflow inline.
+
 ## Preconditions
 
 - Require `git` and `gix`.

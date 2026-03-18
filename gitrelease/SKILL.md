@@ -7,6 +7,15 @@ description: "Use when preparing and cutting a release on the repository default
 
 Use `$Git Release` when the user wants Codex to prepare and cut a release from the repository default branch.
 
+## Runtime Routing
+
+If the host supports subagents with explicit `model` and `reasoning_effort`, read `agents/runtime.yaml` before running this skill.
+
+- Keep the controller in the main thread responsible for user communication, live-worktree verification, and final reporting.
+- Delegate only steps whose `workspace` requirement the host can satisfy.
+- In hosts where subagents run in forked workspaces, only delegate `fork-safe` planning or inspection steps. Run `same-worktree` steps such as changelog edits, commits, pushes, and tagging inline in the controller.
+- If subagents or model controls are unavailable, run the full workflow inline and preserve the same guardrails.
+
 ## Preconditions
 
 - `gh`, `git`, `gix`, and the repository's standard build tooling must be installed.
