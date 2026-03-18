@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mediaops"
+  short_description: "Run local media workflows and inspect image capabilities"
+  default_prompt: "Use $mediaops to inspect image capabilities, generate or edit images, generate or stitch video, or run HeyGen workflows with the local multi-provider CLI."
