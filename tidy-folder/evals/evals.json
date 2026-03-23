@@ -1,0 +1,41 @@
+{
+  "skill_name": "tidy-folder",
+  "evals": [
+    {
+      "id": "freelance-designer",
+      "prompt": "My downloads folder is a total mess. Can you help me organize it? I'm a freelance graphic designer with two kids (ages 6 and 9).",
+      "fixture": "fixtures/freelance-designer/test-folder",
+      "expected_output": "Should create life-domain categories (Kids, Client-Work, Design-Assets, etc.) rather than file-type buckets. Kids' school docs should NOT end up in 'Documents'. Client invoices should NOT end up in 'Finance' mixed with personal taxes. Design assets should be separate from personal photos.",
+      "assertions": [
+        "No top-level category uses a banned vague name: 'Documents', 'Files', 'Data', 'Stuff', 'Personal', 'Misc', 'Resources', 'Assets', 'Materials', 'Media', 'General', 'Other', 'Archive', 'Old'",
+        "No top-level category named by file type: 'PDFs', 'Images', 'Spreadsheets', 'Videos'",
+        "Kids-related files are under a 'Kids' category, not 'Personal' or 'Documents'",
+        "Client work is separated from personal files",
+        "No folder nesting deeper than 3 levels from root"
+      ]
+    },
+    {
+      "id": "polluted-project",
+      "prompt": "I need to clean up this project folder, it's gotten out of hand with random downloads and temp files mixed in with actual project work.",
+      "fixture": "fixtures/polluted-project/test-folder",
+      "expected_output": "Should preserve the internal structure of code projects while pulling out misplaced files. Should NOT reorganize node_modules or build artifacts. Should identify what the project actually is and organize supporting files around it.",
+      "assertions": [
+        "Code project internal structure (src/, node_modules/, package.json) is preserved",
+        "Misplaced files (random PDFs, screenshots) are moved out of the project tree",
+        "No modifications to build artifacts or dependency folders"
+      ]
+    },
+    {
+      "id": "retiree-documents",
+      "prompt": "Can you tidy up my documents folder? I'm a retiree, 68, used to be an engineer. Lots of old files from different phases of life mixed together.",
+      "fixture": "fixtures/retiree-documents/test-folder",
+      "expected_output": "Should create categories reflecting a retiree's life domains (Health/Medical, Finances/Retirement, Travel, Hobbies, Family, Home-Maintenance, Legacy career docs). Should NOT create a generic 'Documents' or 'Personal' bucket. Medical records should be prominent and easy to find. Tax docs should be organized by year.",
+      "assertions": [
+        "No top-level category uses a banned vague name: 'Documents', 'Files', 'Data', 'Stuff', 'Personal', 'Misc', 'Resources', 'Assets', 'Materials', 'Media', 'General', 'Other', 'Archive', 'Old'",
+        "Health/Medical records are a prominent top-level category",
+        "Financial docs are separated by purpose (Taxes, Retirement, Banking)",
+        "Career docs are preserved but not dumped into a vague 'Old' or 'Archive' folder"
+      ]
+    }
+  ]
+}
