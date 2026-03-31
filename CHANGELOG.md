@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.0.1] - 2026-03-31
+
+### Improvements
+- Refined release workflow steps for initial version handling and changelog creation.
+
+### Docs
+- Updated documentation to clarify the initial release tagging and version selection process.
+
 ## [v1.0.0] - 2026-03-31
 
 ### Features
