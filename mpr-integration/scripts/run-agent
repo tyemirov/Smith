@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""
+Portable MPR integration wrapper.
+
+Shell contract:
+    tools/run-agent <agent-name> <workdir> <task-file> <output-dir>
+
+The wrapper does not hardcode Codex CLI or Gemini CLI syntax. It delegates the
+actual invocation to MPR_INTEGRATION_CODEX_RUNNER or
+MPR_INTEGRATION_GEMINI_RUNNER.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+from typing import NoReturn
+
+
+def fail(message: str) -> NoReturn:
+    print(f"ERROR: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def load_toml(path: Path) -> dict:
+    with path.open("rb") as handle:
+        return tomllib.load(handle)
+
+
+def resolve_path(root: Path, value: str) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path
+
+    return (root / path).resolve()
+
+
+def repo_root_from_script() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def runner_env_key(agent_name: str) -> str:
+    if agent_name == "codex":
+        return "MPR_INTEGRATION_CODEX_RUNNER"
+    if agent_name == "gemini":
+        return "MPR_INTEGRATION_GEMINI_RUNNER"
+
+    fail(f"unsupported agent '{agent_name}'")
+
+
+def copy_fixture(fixture_dir: Path, workdir: Path) -> None:
+    if not fixture_dir.is_dir():
+        fail(f"fixture directory not found: {fixture_dir}")
+
+    if workdir.exists():
+        shutil.rmtree(workdir)
+
+    shutil.copytree(fixture_dir, workdir)
+
+
+def apply_seed_patch(workdir: Path, patch_file: Path) -> None:
+    if not patch_file.is_file():
+        fail(f"seed patch not found: {patch_file}")
+
+    subprocess.run(
+        ["git", "-C", str(workdir), "apply", str(patch_file)],
+        check=True,
+    )
+
+
+def build_prompt(
+    task: dict,
+    contract_text: str,
+    profile_text: str,
+    prompt_file: Path,
+    workdir: Path,
+) -> None:
+    prompt = task["prompt"].strip()
+    mode = task.get("mode", "greenfield")
+    identifier = task["id"]
+
+    content = f"""Task ID: {identifier}
+Mode: {mode}
+Working directory: {workdir}
+
+Instructions:
+{prompt}
+
+Contract:
+{contract_text}
+
+Profile:
+{profile_text}
+
+Rules:
+- Follow the contract and profile only.
+- Do not inspect unrelated files unless the contract explicitly tells you to.
+- Stop and report if a required value is missing from the contract or profile.
+"""
+    prompt_file.write_text(content, encoding="utf-8")
+
+
+def run_agent(agent_name: str, prompt_file: Path, workdir: Path, output_dir: Path) -> None:
+    env_key = runner_env_key(agent_name)
+    runner = os.environ.get(env_key)
+    if not runner:
+        fail(f"{env_key} is not set")
+
+    env = os.environ.copy()
+    env["MPR_INTEGRATION_AGENT_NAME"] = agent_name
+    env["MPR_INTEGRATION_AGENT_WORKDIR"] = str(workdir)
+    env["MPR_INTEGRATION_AGENT_PROMPT_FILE"] = str(prompt_file)
+    env["MPR_INTEGRATION_AGENT_OUTPUT_DIR"] = str(output_dir)
+
+    result = subprocess.run(
+        ["bash", "-lc", runner],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    (output_dir / "agent.stdout.log").write_text(result.stdout, encoding="utf-8")
+    (output_dir / "agent.stderr.log").write_text(result.stderr, encoding="utf-8")
+
+    if result.returncode != 0:
+        fail(f"agent runner failed with exit code {result.returncode}")
+
+
+def run_verify_script(verify_script: Path, task_file: Path, contract_file: Path, profile_file: Path, workdir: Path, output_dir: Path) -> None:
+    if not verify_script.is_file():
+        fail(f"verify script not found: {verify_script}")
+
+    env = os.environ.copy()
+    env["MPR_INTEGRATION_WORKDIR"] = str(workdir)
+    env["MPR_INTEGRATION_OUTPUT_DIR"] = str(output_dir)
+    env["MPR_INTEGRATION_TASK_FILE"] = str(task_file)
+    env["MPR_INTEGRATION_CONTRACT_FILE"] = str(contract_file)
+    env["MPR_INTEGRATION_PROFILE_FILE"] = str(profile_file)
+
+    result = subprocess.run(
+        ["bash", str(verify_script)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    (output_dir / "verify.stdout.log").write_text(result.stdout, encoding="utf-8")
+    (output_dir / "verify.stderr.log").write_text(result.stderr, encoding="utf-8")
+
+    if result.returncode != 0:
+        fail(f"verify script failed with exit code {result.returncode}")
+
+
+def main() -> None:
+    if len(sys.argv) != 5:
+        fail("usage: run-agent <agent-name> <workdir> <task-file> <output-dir>")
+
+    agent_name = sys.argv[1]
+    workdir = Path(sys.argv[2]).resolve()
+    task_file_arg = Path(sys.argv[3])
+    output_dir = Path(sys.argv[4]).resolve()
+
+    scaffold_root = repo_root_from_script()
+    task_file = task_file_arg if task_file_arg.is_absolute() else (Path.cwd() / task_file_arg).resolve()
+    if not task_file.is_file():
+        fail(f"task file not found: {task_file}")
+
+    task = load_toml(task_file)
+    fixture_dir = resolve_path(scaffold_root, task["fixture"])
+    contract_file = resolve_path(scaffold_root, task["contract"])
+    profile_file = resolve_path(scaffold_root, task["profile"])
+    verify_script = resolve_path(scaffold_root, task["verify_script"])
+    seed_patch = resolve_path(scaffold_root, task["seed_patch"]) if "seed_patch" in task else None
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    copy_fixture(fixture_dir, workdir)
+
+    if seed_patch is not None:
+        apply_seed_patch(workdir, seed_patch)
+
+    prompt_file = output_dir / "prompt.txt"
+    build_prompt(
+        task=task,
+        contract_text=contract_file.read_text(encoding="utf-8"),
+        profile_text=profile_file.read_text(encoding="utf-8"),
+        prompt_file=prompt_file,
+        workdir=workdir,
+    )
+
+    metadata = {
+        "agent": agent_name,
+        "workdir": str(workdir),
+        "task_file": str(task_file),
+        "contract_file": str(contract_file),
+        "profile_file": str(profile_file),
+        "verify_script": str(verify_script),
+        "seed_patch": str(seed_patch) if seed_patch else None,
+    }
+    (output_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+    run_agent(agent_name, prompt_file, workdir, output_dir)
+    run_verify_script(verify_script, task_file, contract_file, profile_file, workdir, output_dir)
+
+
+if __name__ == "__main__":
+    main()

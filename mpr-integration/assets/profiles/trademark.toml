@@ -1,0 +1,39 @@
+name = "trademark"
+description = "Trademark Generator local-Docker profile for shared integration tasks."
+
+[app]
+public_origin = "http://localhost:8080"
+public_host = "localhost"
+
+[tauth]
+browser_url = "http://localhost:8080"
+debug_url = "http://localhost:8081"
+tenant_id = "trademark"
+jwt_issuer = "tauth"
+cookie_name = "app_session"
+login_path = "/auth/google"
+logout_path = "/auth/logout"
+nonce_path = "/auth/nonce"
+
+[mpr_ui]
+config_url = "/config-ui.yaml"
+authenticated_event = "mpr-ui:auth:authenticated"
+unauthenticated_event = "mpr-ui:auth:unauthenticated"
+
+[ledger]
+host_grpc_addr = "localhost:50051"
+container_grpc_addr = "ledger:50051"
+tenant_id = "trademark"
+ledger_id = "default"
+balance_path = "/api/balance"
+
+[pinguin]
+host_grpc_addr = "localhost:50052"
+container_grpc_addr = "pinguin:50051"
+completion_emails_enabled = false
+
+[crawler]
+proxy_file_key = "PROXY_FILE"
+
+[verification]
+protected_route = "/api/jobs"

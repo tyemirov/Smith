@@ -1,0 +1,18 @@
+id = "tauth/wrong-browser-host"
+mode = "repair"
+contract = "references/contracts/tauth.md"
+profile = "assets/profiles/trademark.toml"
+fixture = "assets/fixtures/tauth-site"
+seed_patch = "assets/seeds/tauth/wrong-browser-host.patch"
+verify_script = "scripts/verify/tauth.sh"
+
+prompt = """
+Repair the TAuth integration using only the supplied contract and profile.
+
+The fixture has one seeded defect:
+- browser-facing auth config points at a container-internal hostname
+
+Fix the defect without changing unrelated literals.
+Keep the same-origin auth shape.
+Stop and report if the contract or profile is missing a required value.
+"""

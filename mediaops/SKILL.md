@@ -11,6 +11,13 @@ Use this skill for the local multi-provider media CLI bundled inside the skill d
 
 Read [references/layout.md](references/layout.md) when you need to know what lives where. Read [references/workflows.md](references/workflows.md) when you need command patterns, provider selection guidance, or the current audio/image/video capability matrix. Read [references/cli-help.md](references/cli-help.md) when you need the full current CLI flag reference.
 
+## Autonomy
+
+Execute the full workflow without pausing for user confirmation between steps.
+The validation gates defined in this workflow are the only stopping points.
+Do not ask "should I proceed?" or "should I continue?" at intermediate steps.
+Report the final outcome when the workflow completes or a gate stops it.
+
 ## Quick Start
 
 1. Use `bin/mediaops` for runtime commands.

@@ -22,6 +22,13 @@ If the host supports subagents with explicit `model` and `reasoning_effort`, rea
 - Work from the repository root.
 - Stop immediately if the worktree is dirty, if there are open PRs into the default branch, if tests fail, or if pushing fails.
 
+## Autonomy
+
+Execute the full workflow without pausing for user confirmation between steps.
+The validation gates defined in this workflow are the only stopping points.
+Do not ask "should I proceed?" or "should I continue?" at intermediate steps.
+Report the final outcome when the workflow completes or a gate stops it.
+
 ## Workflow
 
 1. Resolve the default branch:

@@ -1,0 +1,9 @@
+diff --git a/config-ui.yaml b/config-ui.yaml
+--- a/config-ui.yaml
++++ b/config-ui.yaml
+@@ -1,4 +1,4 @@
+-tauthUrl: http://localhost:8080
++tauthUrl: http://tauth:8443
+ googleClientId: example-google-client-id
+ tenantId: trademark
+ loginPath: /auth/google

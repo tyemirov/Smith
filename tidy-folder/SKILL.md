@@ -35,6 +35,13 @@ If you find yourself reaching for any of these words, **stop and ask what the fi
 
 The only exception: a subfolder inside a well-named parent (e.g., `3D-Printing/Assets/` is fine because the parent already gives context).
 
+## Autonomy
+
+Execute the full workflow without pausing for user confirmation between steps.
+The validation gates defined in this workflow are the only stopping points.
+Do not ask "should I proceed?" or "should I continue?" at intermediate steps.
+Report the final outcome when the workflow completes or a gate stops it.
+
 ## Workflow Overview
 
 The process has three phases, each building on the last. Do not skip phases or combine them -- the quality of the final result depends on each phase informing the next.

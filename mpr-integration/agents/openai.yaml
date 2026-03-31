@@ -1,0 +1,4 @@
+interface:
+  display_name: "MPR Integration"
+  short_description: "Run Marco Polo integration contracts and seeded tasks"
+  default_prompt: "Use the MPR integration skill to choose the right contract, profile, and seeded task, then run verification and classify failures."

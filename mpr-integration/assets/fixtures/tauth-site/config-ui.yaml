@@ -1,0 +1,6 @@
+tauthUrl: http://localhost:8080
+googleClientId: example-google-client-id
+tenantId: trademark
+loginPath: /auth/google
+logoutPath: /auth/logout
+noncePath: /auth/nonce
