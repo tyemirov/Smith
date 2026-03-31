@@ -50,15 +50,15 @@ Report the final outcome when the workflow completes or a gate stops it.
    If validation fails, report the failure and stop.
 6. Find the latest version tag:
    `git tag -l 'v*' --sort=-version:refname | head -n 1`
-   If no version tags exist, treat the current version as `v0.0.0` and handle the release as the first tagged release.
-7. Choose the next semver version.
+   If no version tags exist, this is the first tagged release. Use `v1.0.0` as the version without asking for confirmation.
+7. Choose the next semver version. Skip this step if step 6 already determined `v1.0.0` for the initial release.
 8. Generate the release changelog message:
    If `latest_tag` exists:
    `gix message changelog --since-tag "$latest_tag" --version "$next_version" --release-date "$(date +%F)"`
    Otherwise:
    `gix message changelog --version "$next_version" --release-date "$(date +%F)"`
 9. Update `CHANGELOG.md` by inserting the new release section near the top of the released versions section.
-   If `CHANGELOG.md` does not exist, report that and stop.
+   If `CHANGELOG.md` does not exist, create it with a standard header and the generated release section.
 10. Commit and push only the changelog update on the default branch:
    `git add CHANGELOG.md`
    `git commit -m "Release $next_version"`
