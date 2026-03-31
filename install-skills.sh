@@ -5,20 +5,24 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 codex_home="${CODEX_HOME:-$HOME/.codex}"
 skills_dir="$codex_home/skills"
+claude_home="${CLAUDE_HOME:-$HOME/.claude}"
+claude_commands_dir="$claude_home/commands"
 dry_run=0
 force=0
 
 usage() {
   cat <<'EOF'
-Usage: install-skills.sh [--codex-home PATH] [--dry-run] [--force]
+Usage: install-skills.sh [--codex-home PATH] [--claude-home PATH] [--dry-run] [--force]
 
-Symlink the custom skills in this repository into the Codex skills directory.
+Symlink the custom skills in this repository into the Codex skills directory
+and Claude Code user commands directory.
 
 Options:
-  --codex-home PATH  Override the Codex home directory. Defaults to $CODEX_HOME or ~/.codex.
-  --dry-run          Show what would change without modifying the filesystem.
-  --force            Replace existing skill paths after moving them into a backup directory.
-  -h, --help         Show this help.
+  --codex-home PATH   Override the Codex home directory. Defaults to $CODEX_HOME or ~/.codex.
+  --claude-home PATH  Override the Claude home directory. Defaults to $CLAUDE_HOME or ~/.claude.
+  --dry-run           Show what would change without modifying the filesystem.
+  --force             Replace existing skill paths after moving them into a backup directory.
+  -h, --help          Show this help.
 EOF
 }
 
@@ -84,6 +88,15 @@ resolve_link_target() {
   printf '%s/%s\n' "$link_dir" "$raw_target"
 }
 
+skill_name_from_frontmatter() {
+  local skill_md="$1"
+  awk '/^---$/{if(++c==2)exit} c==1 && /^name:/{sub(/^name:[[:space:]]*"?/,""); sub(/"?[[:space:]]*$/,""); print; exit}' "$skill_md"
+}
+
+slug_from_name() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-'
+}
+
 skill_dirs=()
 
 while [[ $# -gt 0 ]]; do
@@ -95,6 +108,15 @@ while [[ $# -gt 0 ]]; do
       fi
       codex_home="$2"
       skills_dir="$codex_home/skills"
+      shift 2
+      ;;
+    --claude-home)
+      if [[ $# -lt 2 ]]; then
+        log "Missing value for --claude-home"
+        exit 1
+      fi
+      claude_home="$2"
+      claude_commands_dir="$claude_home/commands"
       shift 2
       ;;
     --dry-run)
@@ -130,7 +152,8 @@ run mkdir -p "$skills_dir"
 
 log "Repo root: $repo_root"
 log "Codex home: $codex_home"
-log "Skills dir: $skills_dir"
+log "Codex skills dir: $skills_dir"
+log "Claude commands dir: $claude_commands_dir"
 
 linked_count=0
 skipped_count=0
@@ -173,12 +196,70 @@ for source_dir in "${skill_dirs[@]}"; do
   linked_count=$((linked_count + 1))
 done
 
-log "Done. $(status_text "Linked" "Would link") $linked_count skill(s); skipped $skipped_count already-correct link(s)."
+log "Codex: $(status_text "Linked" "Would link") $linked_count skill(s); skipped $skipped_count already-correct link(s)."
 
 if [[ -n "$backup_root" ]]; then
   log "$(status_text "Backup directory" "Would use backup directory"): $backup_root"
 fi
 
-if [[ -d "$repo_root/mediaops" ]]; then
-  log "Note: mediaops builds its runtime from MEDIAOPS_REPO when no cached binary is present."
+# --- Claude Code commands ---
+
+run mkdir -p "$claude_commands_dir"
+
+claude_linked_count=0
+claude_skipped_count=0
+backup_root=""
+
+for source_dir in "${skill_dirs[@]}"; do
+  skill_md="$source_dir/SKILL.md"
+  raw_name="$(skill_name_from_frontmatter "$skill_md")"
+  if [[ -z "$raw_name" ]]; then
+    log "Warning: no name in frontmatter of $skill_md, skipping Claude command"
+    continue
+  fi
+
+  command_slug="$(slug_from_name "$raw_name")"
+  target_path="$claude_commands_dir/$command_slug.md"
+  source_path="$(canonical_path "$skill_md")"
+
+  if [[ -L "$target_path" ]]; then
+    current_target="$(resolve_link_target "$target_path")"
+    if [[ -e "$current_target" ]]; then
+      current_target="$(canonical_path "$current_target")"
+    fi
+    if [[ "$current_target" == "$source_path" ]]; then
+      log "Already linked: /$command_slug"
+      claude_skipped_count=$((claude_skipped_count + 1))
+      continue
+    fi
+
+    if [[ "$force" -ne 1 ]]; then
+      log "Conflict: $target_path points to $current_target"
+      log "Re-run with --force to replace it."
+      exit 1
+    fi
+
+    backup_path "$target_path"
+  elif [[ -e "$target_path" ]]; then
+    if [[ "$force" -ne 1 ]]; then
+      log "Conflict: $target_path already exists"
+      log "Re-run with --force to move it aside into a backup directory."
+      exit 1
+    fi
+
+    backup_path "$target_path"
+  fi
+
+  run ln -s "$source_path" "$target_path"
+  log "$(status_text "Linked" "Would link"): /$command_slug -> $source_path"
+  claude_linked_count=$((claude_linked_count + 1))
+done
+
+log "Claude: $(status_text "Linked" "Would link") $claude_linked_count command(s); skipped $claude_skipped_count already-correct link(s)."
+
+if [[ -n "$backup_root" ]]; then
+  log "$(status_text "Backup directory" "Would use backup directory"): $backup_root"
 fi
+
+log ""
+log "Done."

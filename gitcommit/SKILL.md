@@ -23,6 +23,13 @@ If the host supports subagents with explicit `model` and `reasoning_effort`, rea
 - Respect repo-local instructions before committing or pushing. If `AGENTS.md`, `POLICY.md`, or similar docs require validation, ensure the required checks have passed or stop and report the missing gate.
 - Never amend, rebase, force-push, or guess a remote when the target is ambiguous unless the user explicitly asks.
 
+## Autonomy
+
+Execute the full workflow without pausing for user confirmation between steps.
+The validation gates defined in this workflow are the only stopping points.
+Do not ask "should I proceed?" or "should I continue?" at intermediate steps.
+Report the final outcome when the workflow completes or a gate stops it.
+
 ## Workflow
 
 1. Inspect the repository state before mutating anything:
