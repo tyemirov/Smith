@@ -25,7 +25,6 @@ Use `./install-skills.sh --help` for options such as `--codex-home`,
 | Git Commit | `$Git Commit` | `/git-commit` |
 | Git Release | `$Git Release` | `/git-release` |
 | Mediaops | `$mediaops` | `/mediaops` |
-| MPR Integration | `$MPR Integration` | `/mpr-integration` |
 | Tidy Folder | `$Tidy Folder` | `/tidy-folder` |
 
 ## Skill format

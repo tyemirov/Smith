@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tidy Folder"
+  short_description: "Reorganize a folder with deterministic manifest-based taxonomy and hard low-confidence gating"
+  default_prompt: "Use $Tidy Folder with a strict multi-agent flow to build and validate a semantic manifest, iterate refinement until low-confidence is zero, then execute only gate-approved moves." 
