@@ -24,7 +24,6 @@ Use `./install-skills.sh --help` for options such as `--codex-home`,
 | Email Cleanup | `$Email Cleanup` | `/email-cleanup` |
 | Git Commit | `$Git Commit` | `/git-commit` |
 | Git Release | `$Git Release` | `/git-release` |
-| Mediaops | `$mediaops` | `/mediaops` |
 | Tidy Folder | `$Tidy Folder` | `/tidy-folder` |
 
 ## Skill format
@@ -40,13 +39,3 @@ Optional metadata files:
 - `agents/runtime.yaml`: subagent routing when a host supports explicit `model`
   and `reasoning_effort` controls. Routing files distinguish `fork-safe` steps
   from `same-worktree` steps so Git mutations stay in the live repository.
-
-## Notes
-
-- Secret-bearing local environment files are not tracked. See
-  `mediaops/.env.example` for the expected variables.
-- `mediaops/bin/mediaops` is a small wrapper. The compiled runtime is cached
-  under `mediaops/.cache/bin/mediaops` when available.
-- On a fresh machine, set `MEDIAOPS_REPO` to the `Sheet2Tube` source checkout
-  or place that repo at `$HOME/Development/MarcoPoloResearchLab/Sheet2Tube` so
-  the wrapper can build the runtime on demand.
