@@ -1,0 +1,4 @@
+interface:
+  display_name: "Email Cleanup"
+  short_description: "Run policy-driven Gmail cleanup at scale"
+  default_prompt: "Use $Email Cleanup to choose a composable Gmail cleanup program bundle, protect durable mail, and resolve mail by sorting or deletion rather than archive."
