@@ -1,4 +1,4 @@
-# Codex Skills
+# Smith
 
 Custom skills for Codex and Claude Code.
 
