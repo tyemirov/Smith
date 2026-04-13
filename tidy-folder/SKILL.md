@@ -77,7 +77,7 @@ python3 ./scripts/run_tidy_folder.py /path/to/folder
 python3 ./scripts/run_tidy_folder.py /path/to/folder --execute
 ```
 
-- The script uses a `uv` shebang (`#!/usr/bin/env -S uv run --with torch --with torchvision --script`) and declares Python requirements inline, so dependencies are resolved automatically.
+- The script uses a lightweight `uv` shebang (`#!/usr/bin/env -S uv run --script`) and declares its baseline Python requirements inline, so ordinary non-vision scans do not pay the local vision-model install cost.
 - Vision mode is opt-in and explicit (recommended for images/videos):
 
 ```bash
@@ -85,7 +85,7 @@ uv run ./scripts/semantic_scan.py /path/to/folder --manifest --autopilot --visio
 uv run ./scripts/semantic_scan.py /path/to/folder --manifest --autopilot --vision --vision-provider openai
 ```
 
-- Vision dependencies are available via the `uv` launcher; enable multimodal captioning explicitly with `--vision`. Use `--vision-provider openai` to run image/video understanding through an API model (requires `OPENAI_API_KEY`) instead of local BLIP/CLIP-style captioning.
+- Vision mode stays opt-in. When you request `--vision --vision-provider hf`, the script bootstraps the extra local `transformers`/`torch` runtime on demand through `uv`; use `--vision-provider openai` to route image/video understanding through an API model instead (requires `OPENAI_API_KEY`).
 
 Native tools like `ffmpeg`, `pdftotext`, `tesseract`, `mdls`, `file`, `strings`, and `antiword` are optional accelerators. If a machine does not have them, the scanner still works, but some files will stay low-confidence until enough evidence is available.
 
