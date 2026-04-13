@@ -94,9 +94,6 @@ TEXT_EXTS = {
     ".md",
     ".rst",
     ".log",
-    ".csv",
-    ".tsv",
-    ".json",
     ".xml",
     ".yaml",
     ".yml",
@@ -114,6 +111,9 @@ TEXT_EXTS = {
     ".sh",
     ".bash",
 }
+
+CSV_EXTS = {".csv", ".tsv"}
+JSON_EXTS = {".json"}
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
@@ -274,6 +274,9 @@ GENERIC_TAXONOMY_SEGMENTS = {
     "dev",
     "dev-tools",
     "downloads",
+    "document",
+    "documents",
+    "docs",
     "dump",
     "files",
     "general",
@@ -289,16 +292,22 @@ GENERIC_TAXONOMY_SEGMENTS = {
     "notes",
     "old",
     "other",
+    "pdf",
+    "pdfs",
     "personal",
     "photos",
     "project",
     "projects",
     "public",
+    "reference",
+    "references",
+    "refs",
     "resources",
     "samples",
     "scratch",
     "share",
     "shared",
+    "sorted",
     "stuff",
     "temp",
     "temporary",
@@ -313,6 +322,47 @@ GENERIC_TAXONOMY_SEGMENTS = {segment.lower() for segment in GENERIC_TAXONOMY_SEG
 
 PRODUCTION_MODE_TAXONOMY_BLACKLIST = {
     "ai-generations",
+}
+
+PROJECT_INTERNAL_SEGMENTS = {
+    "app",
+    "apps",
+    "bin",
+    "build",
+    "components",
+    "config",
+    "configs",
+    "coverage",
+    "dist",
+    "examples",
+    "fixtures",
+    "lib",
+    "logs",
+    "node_modules",
+    "scripts",
+    "src",
+    "styles",
+    "test",
+    "tests",
+    "tmp",
+    "tools",
+    "utils",
+}
+
+MDLS_CONTENT_FIELDS = {
+    "kMDItemAlbum",
+    "kMDItemAlternateNames",
+    "kMDItemAuthors",
+    "kMDItemComment",
+    "kMDItemComposer",
+    "kMDItemDescription",
+    "kMDItemDisplayName",
+    "kMDItemFinderComment",
+    "kMDItemHeadline",
+    "kMDItemKeywords",
+    "kMDItemMusicalGenre",
+    "kMDItemTitle",
+    "kMDItemWhereFroms",
 }
 
 PROJECT_MARKER_FILES = {
@@ -378,7 +428,6 @@ RULES: tuple[Rule, ...] = (
             ("installer", 3.0),
             ("archive", 2.0),
             ("dmg", 3.0),
-            ("app", 1.0),
             ("vlc", 4.0),
         ),
     ),
@@ -645,6 +694,15 @@ RULES: tuple[Rule, ...] = (
         "Projects/Code",
         (
             ("package.json", 5.0),
+            ("package-lock.json", 4.5),
+            ("pyproject.toml", 4.5),
+            ("go.mod", 4.5),
+            ("cargo.toml", 4.5),
+            ("requirements.txt", 4.0),
+            ("setup.py", 4.0),
+            ("makefile", 4.0),
+            ("readme.md", 2.5),
+            (".gitignore", 3.5),
             ("src/", 4.0),
             ("node_modules", 4.0),
             ("tsconfig", 4.0),
@@ -652,7 +710,6 @@ RULES: tuple[Rule, ...] = (
             ("bundle", 2.5),
             ("playground", 2.0),
             ("prototype", 2.0),
-            ("test", 1.0),
         ),
     ),
     Rule(
@@ -754,6 +811,54 @@ def strip_quotes(value: str) -> str:
     return value
 
 
+PATTERN_REGEX_CACHE: dict[str, re.Pattern[str]] = {}
+
+
+def pattern_regex(pattern: str) -> re.Pattern[str]:
+    cached = PATTERN_REGEX_CACHE.get(pattern)
+    if cached is not None:
+        return cached
+
+    escaped = re.escape(pattern.lower())
+    if pattern and pattern[-1] in "/._-+":
+        expr = rf"(?<![a-z0-9]){escaped}"
+    else:
+        expr = rf"(?<![a-z0-9]){escaped}(?![a-z0-9])"
+    compiled = re.compile(expr)
+    PATTERN_REGEX_CACHE[pattern] = compiled
+    return compiled
+
+
+def pattern_in_text(pattern: str, text: str) -> bool:
+    if not pattern or not text:
+        return False
+    return bool(pattern_regex(pattern).search(text))
+
+
+def flatten_text_values(value: Any, limit: int = 400) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, bytes):
+        try:
+            value = value.decode("utf-8", errors="ignore")
+        except Exception:
+            value = value.decode(errors="ignore")
+    if isinstance(value, dict):
+        parts: list[str] = []
+        for item in value.values():
+            parts.extend(flatten_text_values(item, limit=limit))
+        return parts
+    if isinstance(value, (list, tuple, set)):
+        parts: list[str] = []
+        for item in value:
+            parts.extend(flatten_text_values(item, limit=limit))
+        return parts
+    text = str(value).strip()
+    if not text:
+        return []
+    return [text[:limit]]
+
+
 def text_value(value: Any, limit: int = 400) -> str:
     if value is None:
         return ""
@@ -793,6 +898,10 @@ def detect_kind(path: Path, mime: str) -> str:
         return "xlsx"
     if ext in OLD_OFFICE_EXTS:
         return "legacy-office"
+    if ext in CSV_EXTS:
+        return "csv"
+    if ext in JSON_EXTS:
+        return "json"
     if ext in IMAGE_EXTS or (mime or "").startswith("image/"):
         return "image"
     if ext in VIDEO_EXTS or (mime or "").startswith("video/"):
@@ -1004,6 +1113,47 @@ def extract_csv_preview(path: Path) -> str:
         return "\n".join(rows)[:5000]
     except Exception:
         return ""
+
+
+def summarize_json_payload(value: Any, prefix: str = "", limit: int = 40) -> list[str]:
+    if limit <= 0:
+        return []
+    if isinstance(value, dict):
+        rows: list[str] = []
+        for key, item in list(value.items())[:limit]:
+            label = f"{prefix}.{key}" if prefix else str(key)
+            if isinstance(item, (dict, list)):
+                rows.append(label)
+                rows.extend(summarize_json_payload(item, prefix=label, limit=max(limit - len(rows), 0)))
+            else:
+                item_text = text_value(item, 120)
+                rows.append(f"{label}: {item_text}" if item_text else label)
+            if len(rows) >= limit:
+                break
+        return rows[:limit]
+    if isinstance(value, list):
+        rows: list[str] = []
+        for idx, item in enumerate(value[: min(len(value), limit)], start=1):
+            label = f"{prefix}[{idx}]" if prefix else f"[{idx}]"
+            if isinstance(item, (dict, list)):
+                rows.append(label)
+                rows.extend(summarize_json_payload(item, prefix=label, limit=max(limit - len(rows), 0)))
+            else:
+                item_text = text_value(item, 120)
+                rows.append(f"{label}: {item_text}" if item_text else label)
+            if len(rows) >= limit:
+                break
+        return rows[:limit]
+    leaf = text_value(value, 120)
+    return [f"{prefix}: {leaf}" if prefix else leaf] if leaf else []
+
+
+def extract_json_preview(path: Path) -> str:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        return read_text_preview(path)
+    return "\n".join(summarize_json_payload(data))[:5000]
 
 
 def extract_old_office_preview(path: Path) -> str:
@@ -1506,12 +1656,18 @@ def extract_video_frame_vision(path: Path, metadata: dict[str, Any]) -> str:
 
 def extract_sources(
     path: Path,
+    root: Path,
     kind: str,
     mime: str,
     *,
     vision_enabled: bool = False,
 ) -> tuple[dict[str, str], dict[str, Any], list[str]]:
-    sources: dict[str, str] = {"path": str(path).lower(), "name": path.name.lower()}
+    try:
+        relative_path = path.relative_to(root).as_posix().lower()
+    except ValueError:
+        relative_path = path.name.lower()
+
+    sources: dict[str, str] = {"path": relative_path, "name": path.name.lower()}
     metadata: dict[str, Any] = {}
     notes: list[str] = []
 
@@ -1551,6 +1707,12 @@ def extract_sources(
         text = extract_csv_preview(path)
         if text:
             sources["text"] = text.lower()
+    elif kind == "json":
+        text = extract_json_preview(path)
+        if text:
+            sources["text"] = text.lower()
+        else:
+            notes.append("no_json_text")
     elif kind == "legacy-office":
         text = extract_old_office_preview(path)
         if text:
@@ -1560,7 +1722,11 @@ def extract_sources(
     elif kind == "image":
         metadata = parse_mdls(path)
         if metadata:
-            metadata = {key: value for key, value in metadata.items() if key.startswith("kMDItem")}
+            metadata = {
+                key: value
+                for key, value in metadata.items()
+                if key in MDLS_CONTENT_FIELDS
+            }
         image_metadata = extract_image_metadata(path)
         if image_metadata:
             metadata.update(image_metadata)
@@ -1598,7 +1764,7 @@ def extract_sources(
         notes.append("archive_unreadable")
 
     if metadata:
-        metadata_text = text_value(metadata, 5000)
+        metadata_text = " ".join(flatten_text_values(metadata, limit=5000))[:5000]
         if metadata_text:
             sources["metadata"] = metadata_text.lower()
 
@@ -1622,6 +1788,11 @@ def is_meaningful_taxonomy_segment(segment: str) -> bool:
     return any(token not in GENERIC_TAXONOMY_SEGMENTS for token in tokens)
 
 
+def is_project_internal_segment(segment: str) -> bool:
+    normalized = slugify(segment).lower()
+    return normalized in PROJECT_INTERNAL_SEGMENTS
+
+
 def collect_existing_taxonomy_hints(
     paths: list[Path], root: Path, max_depth: int = TAXONOMY_HINT_MAX_DEPTH
 ) -> dict[str, tuple[str, float, int]]:
@@ -1642,6 +1813,8 @@ def collect_existing_taxonomy_hints(
         for depth in range(1, min(len(ancestor_parts), max_depth) + 1):
             candidate_parts = ancestor_parts[:depth]
             if any(part.lower() in PRODUCTION_MODE_TAXONOMY_BLACKLIST for part in candidate_parts):
+                continue
+            if any(is_project_internal_segment(part) for part in candidate_parts):
                 continue
             if not is_meaningful_taxonomy_segment(candidate_parts[-1]):
                 continue
@@ -1819,7 +1992,7 @@ def score_record(
         for source_name, source_text in record_sources.items():
             source_weight = active_source_weights.get(source_name, 1.0)
             for pattern, pattern_weight in rule.patterns:
-                if pattern in source_text:
+                if pattern_in_text(pattern, source_text):
                     contribution = source_weight * pattern_weight
                     score += contribution
                     evidence.append(f"{source_name}:{pattern}")
@@ -1902,6 +2075,10 @@ def tokenize_for_summary(text: str) -> list[str]:
         if len(lower) < 3:
             continue
         if lower in PROJECT_STOP_TOKENS:
+            continue
+        if lower in GENERIC_TAXONOMY_SEGMENTS:
+            continue
+        if lower in PROJECT_INTERNAL_SEGMENTS:
             continue
         if lower.isdigit():
             continue
@@ -2012,16 +2189,20 @@ def scan_file(
     mime = mime_type(path)
     kind = detect_kind(path, mime)
     stat_result = path.stat()
-    sources, metadata, notes = extract_sources(path, kind, mime, vision_enabled=vision)
+    sources, metadata, notes = extract_sources(path, root, kind, mime, vision_enabled=vision)
     file_taxonomy_hints = infer_taxonomy_hints(path, root, taxonomy_hints)
     top_candidates, confidence, suggested_home, needs_refinement = score_record(
         sources, kind, existing_taxonomy_hints=file_taxonomy_hints
     )
     final_home, placement_mode = resolve_final_home(kind, suggested_home, top_candidates, autopilot=autopilot)
     flags = sensitivity_flags(sources, metadata)
-    combined_for_tokens = " ".join(sources.values())
+    combined_for_tokens = " ".join(
+        text for source_name, text in sources.items() if source_name != "file"
+    )
     if metadata:
-        combined_for_tokens += " " + json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        metadata_summary = " ".join(flatten_text_values(metadata, limit=5000))
+        if metadata_summary:
+            combined_for_tokens += " " + metadata_summary
     tokens = set(tokenize_for_summary(combined_for_tokens))
 
     record = FileRecord(
