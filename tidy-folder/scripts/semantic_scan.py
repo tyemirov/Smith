@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --with torch --with torchvision --script
+#!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
@@ -6,9 +6,6 @@
 #   "openpyxl>=3.1",
 #   "Pillow>=10.0",
 #   "pypdf>=5.0",
-#   "transformers>=4.41",
-#   "torch",
-#   "torchvision",
 # ]
 # ///
 """Semantic inventory scanner for tidy-folder.
@@ -229,6 +226,7 @@ VISION_MODELS = (
 )
 OPENAI_VISION_MODEL = "gpt-4o-mini"
 OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions"
+LOCAL_VISION_BOOTSTRAP_ENV = "TIDY_FOLDER_LOCAL_VISION_BOOTSTRAPPED"
 
 
 WEAK_CONTEXT_REVIEW_TOP_MIN = 3.0
@@ -744,6 +742,19 @@ SENSITIVE_PATTERNS = (
     "proxy",
     "session required",
 )
+
+
+@dataclass
+class FileEvidence:
+    path: str
+    kind: str
+    mime: str
+    size: int
+    mtime: str
+    sources: dict[str, str]
+    metadata: dict[str, Any]
+    notes: list[str]
+    tokens: list[str]
 
 
 @dataclass
@@ -1327,6 +1338,37 @@ def set_vision_provider(provider: str, model: str = "") -> None:
     VISION_PROVIDER_MODEL = (model or "").strip()
 
 
+def ensure_local_vision_runtime(argv: list[str]) -> None:
+    if VISION_PROVIDER == "openai" or hf_pipeline is not None:
+        return
+    if os.getenv(LOCAL_VISION_BOOTSTRAP_ENV) == "1":
+        return
+
+    uv_path = shutil.which("uv")
+    if uv_path is None:
+        return
+
+    env = os.environ.copy()
+    env[LOCAL_VISION_BOOTSTRAP_ENV] = "1"
+    script_path = str(Path(__file__).resolve())
+    os.execvpe(
+        uv_path,
+        [
+            uv_path,
+            "run",
+            "--with",
+            "transformers>=4.41",
+            "--with",
+            "torch",
+            "--with",
+            "torchvision",
+            script_path,
+            *argv[1:],
+        ],
+        env,
+    )
+
+
 def resolve_vision_model() -> str:
     if VISION_PROVIDER != "openai":
         return ""
@@ -1490,42 +1532,27 @@ def validate_vision_readiness(paths: list[Path]) -> tuple[bool, dict[str, Any]]:
             },
         )
 
-    results: dict[str, dict[str, Any]] = {}
-    for kind in media_kinds:
-        kind_files = [entry for entry in media_files if entry[1] == kind][:3]
-        attempts = 0
-        for media_path, _ in kind_files:
-            attempts += 1
-            if kind == "image":
-                caption = extract_image_vision_caption(media_path, max_chars=200)
-            else:
-                metadata = parse_ffprobe(media_path)
-                caption = extract_video_frame_vision(media_path, metadata)
-            if caption:
-                results[kind] = {"status": "ok", "caption": caption[:80], "sample_path": str(media_path), "attempts": attempts}
-                break
-
-        if kind not in results:
-            results[kind] = {
-                "status": "no_vision_signal",
-                "sample_count": len(kind_files),
-                "sample_paths": [str(path) for path, _ in kind_files],
-            }
-            return (
-                False,
-                {
-                    "enabled": True,
-                    "status": "vision_signal_missing",
-                    "details": results,
-                },
-            )
+    if "video" in media_kinds and not tool_exists("ffmpeg"):
+        return (
+            False,
+            {
+                "enabled": True,
+                "status": "missing_tool",
+                "reason": "Video vision analysis requires ffmpeg to sample frames.",
+            },
+        )
 
     return (
         True,
         {
             "enabled": True,
             "status": "ready",
-            "details": results,
+            "details": {
+                "provider": VISION_PROVIDER,
+                "model": resolve_vision_model() if VISION_PROVIDER == "openai" else "local-hf",
+                "media_kinds": media_kinds,
+                "file_count": len(media_files),
+            },
         },
     )
 
@@ -2157,23 +2184,11 @@ def build_manifest_entry(record: FileRecord) -> dict[str, Any]:
     }
 
 
-def scan_file(
-    path: Path,
-    root: Path,
-    taxonomy_hints: dict[str, tuple[str, float, int]],
-    autopilot: bool = False,
-    vision: bool = False,
-) -> tuple[FileRecord, set[str]]:
+def build_file_evidence(path: Path, root: Path, vision: bool = False) -> FileEvidence:
     mime = mime_type(path)
     kind = detect_kind(path, mime)
     stat_result = path.stat()
     sources, metadata, notes = extract_sources(path, root, kind, mime, vision_enabled=vision)
-    file_taxonomy_hints = infer_taxonomy_hints(path, root, taxonomy_hints)
-    top_candidates, confidence, suggested_home, needs_refinement = score_record(
-        sources, kind, existing_taxonomy_hints=file_taxonomy_hints
-    )
-    final_home, placement_mode = resolve_final_home(kind, suggested_home, top_candidates, autopilot=autopilot)
-    flags = sensitivity_flags(sources, metadata)
     combined_for_tokens = " ".join(
         text for source_name, text in sources.items() if source_name != "file"
     )
@@ -2181,9 +2196,9 @@ def scan_file(
         metadata_summary = " ".join(flatten_text_values(metadata, limit=5000))
         if metadata_summary:
             combined_for_tokens += " " + metadata_summary
-    tokens = set(tokenize_for_summary(combined_for_tokens))
+    tokens = sorted(set(tokenize_for_summary(combined_for_tokens)))
 
-    record = FileRecord(
+    return FileEvidence(
         path=str(path),
         kind=kind,
         mime=mime,
@@ -2191,6 +2206,35 @@ def scan_file(
         mtime=f"{stat_result.st_mtime:.0f}",
         sources={k: v[:4000] for k, v in sources.items()},
         metadata=metadata,
+        notes=notes,
+        tokens=tokens,
+    )
+
+
+def record_from_evidence(
+    evidence: FileEvidence,
+    root: Path,
+    taxonomy_hints: dict[str, tuple[str, float, int]],
+    autopilot: bool = False,
+) -> FileRecord:
+    evidence_path = Path(evidence.path)
+    file_taxonomy_hints = infer_taxonomy_hints(evidence_path, root, taxonomy_hints)
+    top_candidates, confidence, suggested_home, needs_refinement = score_record(
+        evidence.sources, evidence.kind, existing_taxonomy_hints=file_taxonomy_hints
+    )
+    final_home, placement_mode = resolve_final_home(
+        evidence.kind, suggested_home, top_candidates, autopilot=autopilot
+    )
+    flags = sensitivity_flags(evidence.sources, evidence.metadata)
+
+    return FileRecord(
+        path=evidence.path,
+        kind=evidence.kind,
+        mime=evidence.mime,
+        size=evidence.size,
+        mtime=evidence.mtime,
+        sources=evidence.sources,
+        metadata=evidence.metadata,
         top_candidates=top_candidates,
         suggested_home=suggested_home,
         taxonomy_hints=file_taxonomy_hints,
@@ -2198,10 +2242,27 @@ def scan_file(
         placement_mode=placement_mode,
         confidence=confidence,
         needs_refinement=needs_refinement,
-        flags=flags + notes,
-        tokens=sorted(tokens),
+        flags=sorted(set(flags + evidence.notes)),
+        tokens=evidence.tokens,
     )
-    return record, tokens
+
+
+def scan_file(
+    path: Path,
+    root: Path,
+    taxonomy_hints: dict[str, tuple[str, float, int]],
+    autopilot: bool = False,
+    vision: bool = False,
+    evidence_cache: dict[tuple[str, bool], FileEvidence] | None = None,
+) -> tuple[FileRecord, set[str]]:
+    cache_key = (str(path), vision)
+    evidence = evidence_cache.get(cache_key) if evidence_cache is not None else None
+    if evidence is None:
+        evidence = build_file_evidence(path, root, vision=vision)
+        if evidence_cache is not None:
+            evidence_cache[cache_key] = evidence
+    record = record_from_evidence(evidence, root, taxonomy_hints, autopilot=autopilot)
+    return record, set(evidence.tokens)
 
 
 def walk_files(root: Path, include_ignored: bool = False) -> Iterable[Path]:
@@ -2403,6 +2464,7 @@ def scan_records_with_hints(
     taxonomy_hints: dict[str, tuple[str, float, int]],
     autopilot: bool,
     vision: bool,
+    evidence_cache: dict[tuple[str, bool], FileEvidence] | None = None,
 ) -> tuple[list[FileRecord], list[dict[str, Any]], dict[str, set[str]]]:
     records: list[FileRecord] = []
     file_tokens: dict[str, set[str]] = {}
@@ -2417,10 +2479,10 @@ def scan_records_with_hints(
                 taxonomy_hints=taxonomy_hints,
                 autopilot=autopilot,
                 vision=vision,
+                evidence_cache=evidence_cache,
             )
         except Exception as exc:  # defensive: scanner should not die on one bad file
-            final_home, placement_mode = resolve_final_home("unreadable", None, [], autopilot=autopilot)
-            record = FileRecord(
+            evidence = FileEvidence(
                 path=str(path),
                 kind="unreadable",
                 mime="application/octet-stream",
@@ -2428,17 +2490,13 @@ def scan_records_with_hints(
                 mtime="0",
                 sources={"path": str(path).lower(), "name": path.name.lower()},
                 metadata={},
-                top_candidates=[],
-                suggested_home=None,
-                taxonomy_hints=[],
-                final_home=final_home,
-                placement_mode=placement_mode,
-                confidence=0.0,
-                needs_refinement=True,
-                flags=[f"scan_error:{exc.__class__.__name__}"],
+                notes=[f"scan_error:{exc.__class__.__name__}"],
                 tokens=[],
             )
-            tokens = set()
+            if evidence_cache is not None:
+                evidence_cache[(str(path), vision)] = evidence
+            record = record_from_evidence(evidence, root, taxonomy_hints, autopilot=autopilot)
+            tokens = set(evidence.tokens)
         records.append(record)
         file_tokens[str(path)] = tokens
 
@@ -2501,6 +2559,8 @@ def main() -> int:
 
     if args.vision:
         set_vision_provider(args.vision_provider, args.vision_model)
+        if args.vision_provider != "openai":
+            ensure_local_vision_runtime(sys.argv)
         vision_ready, vision_status = validate_vision_readiness(paths)
         if not vision_ready:
             print(
@@ -2512,9 +2572,15 @@ def main() -> int:
 
     base_taxonomy_hints = collect_existing_taxonomy_hints(paths, root)
     taxonomy_hints = dict(base_taxonomy_hints)
+    evidence_cache: dict[tuple[str, bool], FileEvidence] = {}
 
     records, term_summary, _ = scan_records_with_hints(
-        paths, root=root, taxonomy_hints=taxonomy_hints, autopilot=args.autopilot, vision=args.vision
+        paths,
+        root=root,
+        taxonomy_hints=taxonomy_hints,
+        autopilot=args.autopilot,
+        vision=args.vision,
+        evidence_cache=evidence_cache,
     )
 
     refinement_iterations = [
@@ -2548,7 +2614,12 @@ def main() -> int:
                 break
 
             next_records, next_term_summary, _ = scan_records_with_hints(
-                paths, root=root, taxonomy_hints=merged_hints, autopilot=args.autopilot, vision=args.vision
+                paths,
+                root=root,
+                taxonomy_hints=merged_hints,
+                autopilot=args.autopilot,
+                vision=args.vision,
+                evidence_cache=evidence_cache,
             )
             next_low_confidence = sum(1 for record in next_records if record.needs_refinement)
             refinement_iterations.append(
