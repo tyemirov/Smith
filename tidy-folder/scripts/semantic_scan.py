@@ -366,6 +366,73 @@ PROJECT_MARKER_FILES = {
     "vite.config.ts",
 }
 
+SPECIFICITY_BLOCKED_DESTINATIONS = {
+    "archive",
+    "archives",
+    "data",
+    "document",
+    "documents",
+    "downloads",
+    "file",
+    "files",
+    "general",
+    "inbox",
+    "legacy",
+    "media",
+    "misc",
+    "miscellaneous",
+    "new",
+    "old",
+    "other",
+    "personal",
+    "project",
+    "projects",
+    "reference",
+    "references",
+    "resource",
+    "resources",
+    "shared",
+    "stuff",
+    "temp",
+    "tmp",
+    "unsorted",
+}
+
+TOP_LEVEL_INTENT_ALIASES = {
+    "archive": "archive",
+    "archives": "archive",
+    "document": "document",
+    "documents": "document",
+    "download": "download",
+    "downloads": "download",
+    "file": "file",
+    "files": "file",
+    "project": "project",
+    "projects": "project",
+    "reference": "reference",
+    "references": "reference",
+    "resource": "resource",
+    "resources": "resource",
+}
+
+PROJECT_MARKER_WEIGHTS = {
+    ".git": 4.5,
+    ".gitignore": 3.5,
+    "cargo.toml": 4.0,
+    "cmakelists.txt": 4.0,
+    "makefile": 4.0,
+    "readme.md": 3.0,
+    "build.gradle": 4.0,
+    "go.mod": 4.5,
+    "package.json": 5.0,
+    "package-lock.json": 4.0,
+    "pyproject.toml": 4.5,
+    "requirements.txt": 4.0,
+    "setup.py": 4.0,
+    "vite.config.js": 4.0,
+    "vite.config.ts": 4.0,
+}
+
 
 @dataclass(frozen=True)
 class Rule:
@@ -766,6 +833,25 @@ class FileRecord:
     tokens: list[str]
 
 
+@dataclass(frozen=True)
+class EvidenceBundle:
+    size: int
+    mtime: str
+    mtime_ns: int
+    sources: dict[str, str]
+    metadata: dict[str, Any]
+    notes: list[str]
+    tokens: list[str]
+
+
+@dataclass
+class ScanRuntimeState:
+    project_markers: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    evidence_cache: dict[tuple[str, int, int, bool], EvidenceBundle] = field(default_factory=dict)
+    cache_hits: int = 0
+    cache_misses: int = 0
+
+
 def run_tool(args: list[str], timeout: int = 30) -> tuple[int, str, str]:
     try:
         proc = subprocess.run(
@@ -867,6 +953,138 @@ def text_value(value: Any, limit: int = 400) -> str:
 def slugify(value: str) -> str:
     value = re.sub(r"[^A-Za-z0-9]+", "-", value).strip("-")
     return value or "item"
+
+
+def path_key(parts: tuple[str, ...]) -> str:
+    return "/".join(part.lower() for part in parts if part)
+
+
+def split_home(home: str | None) -> list[str]:
+    if not home:
+        return []
+    return [segment for segment in home.split("/") if segment]
+
+
+def normalized_destination_segment(segment: str) -> str:
+    return slugify(segment).lower()
+
+
+def home_requires_specificity(home: str | None) -> bool:
+    parts = split_home(home)
+    if len(parts) != 1:
+        return False
+    return normalized_destination_segment(parts[0]) in SPECIFICITY_BLOCKED_DESTINATIONS
+
+
+def home_has_redundant_nesting(home: str | None) -> bool:
+    parts = split_home(home)
+    normalized = [normalized_destination_segment(part) for part in parts]
+    return any(left == right for left, right in zip(normalized, normalized[1:]))
+
+
+def top_level_intent_key(segment: str) -> str:
+    normalized = normalized_destination_segment(segment)
+    return TOP_LEVEL_INTENT_ALIASES.get(normalized, normalized)
+
+
+def collect_project_markers(root: Path) -> dict[str, tuple[str, ...]]:
+    if not root.is_dir():
+        return {}
+
+    marker_map: dict[str, tuple[str, ...]] = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        current = Path(dirpath)
+        names = {name.lower() for name in dirnames}
+        names.update(name.lower() for name in filenames)
+        hits = tuple(sorted(marker for marker in PROJECT_MARKER_FILES if marker in names))
+        if hits:
+            try:
+                rel = current.relative_to(root)
+            except ValueError:
+                rel = Path(".")
+            key = "" if rel == Path(".") else rel.as_posix().lower()
+            marker_map[key] = hits
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in DEFAULT_IGNORES and not d.startswith(".")
+        ]
+    return marker_map
+
+
+def ancestor_keys(path: Path, root: Path) -> list[tuple[str, int]]:
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        return []
+
+    ancestors = rel.parts[:-1]
+    keys: list[tuple[str, int]] = [("", 0)]
+    for depth in range(1, len(ancestors) + 1):
+        keys.append((path_key(ancestors[:depth]), depth))
+    return keys
+
+
+def nearest_project_marker_key(
+    path: Path,
+    root: Path,
+    project_markers: dict[str, tuple[str, ...]],
+) -> str | None:
+    for key, _depth in reversed(ancestor_keys(path, root)):
+        if key in project_markers:
+            return key
+    return None
+
+
+def infer_project_marker_hints(
+    path: Path,
+    root: Path,
+    project_markers: dict[str, tuple[str, ...]],
+) -> list[dict[str, Any]]:
+    if not project_markers:
+        return []
+
+    best_hint: dict[str, Any] | None = None
+    for key, depth in ancestor_keys(path, root):
+        markers = project_markers.get(key)
+        if not markers:
+            continue
+
+        weight = 1.8 + sum(PROJECT_MARKER_WEIGHTS.get(marker, 2.5) for marker in markers) + (depth * 0.3)
+        hint = {
+            "home": "Projects/Code",
+            "weight": round(min(weight, 9.5), 2),
+            "support_files": len(markers),
+            "source": "project_markers",
+            "markers": list(markers),
+            "scope": key or ".",
+        }
+        if best_hint is None or float(hint["weight"]) > float(best_hint["weight"]):
+            best_hint = hint
+
+    return [best_hint] if best_hint else []
+
+
+def merge_context_hints(*hint_sets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for hints in hint_sets:
+        for hint in hints:
+            home = str(hint.get("home") or "")
+            if not home:
+                continue
+            existing = merged.get(home)
+            if existing is None or float(hint.get("weight", 0.0)) > float(existing.get("weight", 0.0)):
+                merged[home] = dict(hint)
+
+    return sorted(merged.values(), key=lambda item: float(item.get("weight", 0.0)), reverse=True)
+
+
+def cache_stats(runtime_state: ScanRuntimeState) -> dict[str, int]:
+    return {
+        "hits": runtime_state.cache_hits,
+        "misses": runtime_state.cache_misses,
+        "entries": len(runtime_state.evidence_cache),
+    }
 
 
 def detect_kind(path: Path, mime: str) -> str:
@@ -1777,11 +1995,15 @@ def is_project_internal_segment(segment: str) -> bool:
 
 
 def collect_existing_taxonomy_hints(
-    paths: list[Path], root: Path, max_depth: int = TAXONOMY_HINT_MAX_DEPTH
+    paths: list[Path],
+    root: Path,
+    max_depth: int = TAXONOMY_HINT_MAX_DEPTH,
+    project_markers: dict[str, tuple[str, ...]] | None = None,
 ) -> dict[str, tuple[str, float, int]]:
     raw_counts: Counter[str] = Counter()
     marker_counts: Counter[str] = Counter()
     canonical_by_key: dict[str, str] = {}
+    project_markers = project_markers or {}
 
     for path in paths:
         try:
@@ -1805,10 +2027,20 @@ def collect_existing_taxonomy_hints(
             raw_counts[key] += 1
             canonical_by_key.setdefault(key, "/".join(candidate_parts))
 
-        if path.name.lower() in PROJECT_MARKER_FILES:
-            key = "/".join(part.lower() for part in ancestor_parts)
-            if key:
-                marker_counts[key] += 1
+    for key, markers in project_markers.items():
+        if not key:
+            continue
+        parts = tuple(part for part in key.split("/") if part)
+        if not parts:
+            continue
+        if any(part.lower() in PRODUCTION_MODE_TAXONOMY_BLACKLIST for part in parts):
+            continue
+        if any(is_project_internal_segment(part) for part in parts):
+            continue
+        if not is_meaningful_taxonomy_segment(parts[-1]):
+            continue
+        marker_counts[key] += len(markers)
+        canonical_by_key.setdefault(key, "/".join(parts))
 
     hints: dict[str, tuple[str, float, int]] = {}
     for key, count in raw_counts.items():
@@ -1967,7 +2199,8 @@ def score_record(
         for hint in existing_taxonomy_hints:
             home = hint["home"]
             candidate_scores[home]["score"] += float(hint["weight"])
-            candidate_scores[home]["evidence"].append(f"taxonomy:{home}")
+            source = str(hint.get("source") or "taxonomy")
+            candidate_scores[home]["evidence"].append(f"{source}:{home}")
 
     for rule in RULES:
         score = 0.0
@@ -2009,7 +2242,11 @@ def score_record(
     confidence = round(min(confidence, 0.99), 2)
 
     min_top_threshold = WEAK_CONTEXT_REVIEW_TOP_MIN if project_hint_weight < TAXONOMY_HINT_PROJECT_CONTEXT_THRESHOLD else 4.0
-    needs_refinement = top["score"] < min_top_threshold or confidence < AUTOPILOT_REFINE_CONFIDENCE_THRESHOLD
+    needs_refinement = (
+        top["score"] < min_top_threshold
+        or confidence < AUTOPILOT_REFINE_CONFIDENCE_THRESHOLD
+        or home_requires_specificity(top["home"])
+    )
     suggested_home = None if needs_refinement else top["home"]
     return ranked[:5], confidence, suggested_home, needs_refinement
 
@@ -2043,6 +2280,50 @@ def sensitivity_flags(record_sources: dict[str, str], metadata: dict[str, Any]) 
     if "tax" in lower or "portfolio" in lower or "statement" in lower:
         flags.append("finance")
     return sorted(set(flags))
+
+
+def build_evidence_bundle(
+    path: Path,
+    root: Path,
+    kind: str,
+    mime: str,
+    *,
+    vision_enabled: bool,
+    runtime_state: ScanRuntimeState,
+) -> tuple[os.stat_result, EvidenceBundle]:
+    stat_result = path.stat()
+    cache_key = (
+        str(path),
+        int(stat_result.st_size),
+        int(stat_result.st_mtime_ns),
+        bool(vision_enabled),
+    )
+    cached = runtime_state.evidence_cache.get(cache_key)
+    if cached is not None:
+        runtime_state.cache_hits += 1
+        return stat_result, cached
+
+    sources, metadata, notes = extract_sources(path, root, kind, mime, vision_enabled=vision_enabled)
+    combined_for_tokens = " ".join(
+        text for source_name, text in sources.items() if source_name != "file"
+    )
+    if metadata:
+        metadata_summary = " ".join(flatten_text_values(metadata, limit=5000))
+        if metadata_summary:
+            combined_for_tokens += " " + metadata_summary
+    tokens = sorted(set(tokenize_for_summary(combined_for_tokens)))
+    bundle = EvidenceBundle(
+        size=int(stat_result.st_size),
+        mtime=f"{stat_result.st_mtime:.0f}",
+        mtime_ns=int(stat_result.st_mtime_ns),
+        sources={key: value[:4000] for key, value in sources.items()},
+        metadata=metadata,
+        notes=notes,
+        tokens=tokens,
+    )
+    runtime_state.evidence_cache[cache_key] = bundle
+    runtime_state.cache_misses += 1
+    return stat_result, bundle
 
 
 def tokenize_for_summary(text: str) -> list[str]:
@@ -2106,13 +2387,161 @@ def summarize_taxonomy_seeds(
     return items[:top_n]
 
 
-def build_manifest_entry(record: FileRecord) -> dict[str, Any]:
+def validate_manifest_gates(
+    records: list[FileRecord],
+    root: Path,
+    project_markers: dict[str, tuple[str, ...]],
+) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+    active_failures: list[dict[str, Any]] = []
+    entry_failures: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    low_confidence = [rec.path for rec in records if rec.needs_refinement]
+    if low_confidence:
+        active_failures.append(
+            {
+                "code": "low_confidence_remaining",
+                "message": "Low-confidence entries must be resolved before execution.",
+                "count": len(low_confidence),
+                "sample_paths": low_confidence[:5],
+            }
+        )
+
+    specificity_blocked: list[dict[str, str]] = []
+    redundant_nesting: list[dict[str, str]] = []
+    specificity_candidates: list[dict[str, str]] = []
+    top_level_families: defaultdict[str, set[str]] = defaultdict(set)
+    project_marker_homes: defaultdict[str, Counter[str]] = defaultdict(Counter)
+
+    for rec in records:
+        destination = rec.final_home or rec.suggested_home
+        if destination:
+            parts = split_home(destination)
+            if parts:
+                top_level_families[top_level_intent_key(parts[0])].add(parts[0])
+            if home_requires_specificity(destination):
+                payload = {"source_path": rec.path, "destination": destination}
+                specificity_blocked.append(payload)
+                entry_failures[rec.path].append(
+                    {
+                        "code": "blocked_generic_destination",
+                        "message": f"Destination '{destination}' is too vague for execution.",
+                    }
+                )
+            if home_has_redundant_nesting(destination):
+                payload = {"source_path": rec.path, "destination": destination}
+                redundant_nesting.append(payload)
+                entry_failures[rec.path].append(
+                    {
+                        "code": "redundant_nesting",
+                        "message": f"Destination '{destination}' repeats the same semantic label.",
+                    }
+                )
+
+        top_candidate = rec.top_candidates[0] if rec.top_candidates else None
+        if rec.needs_refinement and top_candidate and home_requires_specificity(top_candidate["home"]):
+            specificity_candidates.append({"source_path": rec.path, "candidate_home": top_candidate["home"]})
+            entry_failures[rec.path].append(
+                {
+                    "code": "specificity_required",
+                    "message": f"Top candidate '{top_candidate['home']}' is too vague and requires a more specific leaf.",
+                }
+            )
+
+        if Path(rec.path).name.lower() in PROJECT_MARKER_FILES and destination:
+            project_key = nearest_project_marker_key(Path(rec.path), root, project_markers)
+            if project_key is not None:
+                project_marker_homes[project_key][destination] += 1
+
+    if specificity_blocked:
+        active_failures.append(
+            {
+                "code": "blocked_generic_destination",
+                "message": "Execution cannot proceed while any entry targets a vague top-level destination.",
+                "count": len(specificity_blocked),
+                "samples": specificity_blocked[:5],
+            }
+        )
+
+    if specificity_candidates:
+        active_failures.append(
+            {
+                "code": "specificity_required",
+                "message": "Some entries still resolve to a vague candidate home and require another refinement pass.",
+                "count": len(specificity_candidates),
+                "samples": specificity_candidates[:5],
+            }
+        )
+
+    if redundant_nesting:
+        active_failures.append(
+            {
+                "code": "redundant_nesting",
+                "message": "Execution cannot proceed while a destination repeats the same semantic label.",
+                "count": len(redundant_nesting),
+                "samples": redundant_nesting[:5],
+            }
+        )
+
+    duplicate_top_levels = [
+        sorted(raw_names)
+        for raw_names in top_level_families.values()
+        if len(raw_names) > 1
+    ]
+    if duplicate_top_levels:
+        active_failures.append(
+            {
+                "code": "duplicate_top_level_intent",
+                "message": "Top-level destinations express the same semantic intent under different names.",
+                "samples": duplicate_top_levels[:5],
+            }
+        )
+
+    project_splits: list[dict[str, Any]] = []
+    for project_key, homes in project_marker_homes.items():
+        if len(homes) <= 1:
+            continue
+        samples = [{"home": home, "count": count} for home, count in homes.most_common()]
+        project_splits.append(
+            {
+                "project_root": project_key or ".",
+                "homes": samples,
+            }
+        )
+        for rec in records:
+            if Path(rec.path).name.lower() not in PROJECT_MARKER_FILES:
+                continue
+            if nearest_project_marker_key(Path(rec.path), root, project_markers) != project_key:
+                continue
+            entry_failures[rec.path].append(
+                {
+                    "code": "project_atomicity_split",
+                    "message": f"Project marker files under '{project_key or '.'}' disagree on the project home.",
+                }
+            )
+
+    if project_splits:
+        active_failures.append(
+            {
+                "code": "project_atomicity_split",
+                "message": "Project marker files under the same project root resolve to multiple destinations.",
+                "samples": project_splits[:5],
+            }
+        )
+
+    return active_failures, dict(entry_failures)
+
+
+def build_manifest_entry(
+    record: FileRecord,
+    entry_gate_failures: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    entry_gate_failures = entry_gate_failures or []
     top_candidate = record.top_candidates[0] if record.top_candidates else None
     rationale = "No strong semantic signal; requires arbitration"
     evidence = []
     alternatives = []
-    status = record.placement_mode
-    destination = record.final_home
+    status = "gate_blocked" if entry_gate_failures else record.placement_mode
+    destination = record.final_home if not entry_gate_failures else None
     if top_candidate:
         rationale = f"Top signal: {top_candidate['home']} ({top_candidate['score']})"
         evidence = top_candidate["evidence"][:6]
@@ -2135,12 +2564,14 @@ def build_manifest_entry(record: FileRecord) -> dict[str, Any]:
             rationale = (
                 "No strong semantic signal; requires automated refinement for high-confidence placement"
             )
+    if entry_gate_failures:
+        rationale = "Blocked by gatekeeper checks before execution."
 
     return {
         "source_path": record.path,
         "proposed_destination": destination,
         "placement_mode": status,
-        "routable": bool(record.final_home and not record.needs_refinement),
+        "routable": bool(destination and not record.needs_refinement),
         "confidence_score": record.confidence,
         "confidence_band": confidence_band(record.confidence, record.needs_refinement),
         "needs_refinement": bool(record.needs_refinement),
@@ -2151,6 +2582,7 @@ def build_manifest_entry(record: FileRecord) -> dict[str, Any]:
         },
         "evidence": evidence,
         "alternatives": alternatives,
+        "gate_failures": entry_gate_failures,
         "flags": record.flags,
         "kind": record.kind,
         "mime": record.mime,
@@ -2161,36 +2593,38 @@ def scan_file(
     path: Path,
     root: Path,
     taxonomy_hints: dict[str, tuple[str, float, int]],
+    runtime_state: ScanRuntimeState,
     autopilot: bool = False,
     vision: bool = False,
 ) -> tuple[FileRecord, set[str]]:
     mime = mime_type(path)
     kind = detect_kind(path, mime)
-    stat_result = path.stat()
-    sources, metadata, notes = extract_sources(path, root, kind, mime, vision_enabled=vision)
-    file_taxonomy_hints = infer_taxonomy_hints(path, root, taxonomy_hints)
+    stat_result, bundle = build_evidence_bundle(
+        path,
+        root,
+        kind,
+        mime,
+        vision_enabled=vision,
+        runtime_state=runtime_state,
+    )
+    file_taxonomy_hints = merge_context_hints(
+        infer_taxonomy_hints(path, root, taxonomy_hints),
+        infer_project_marker_hints(path, root, runtime_state.project_markers),
+    )
     top_candidates, confidence, suggested_home, needs_refinement = score_record(
-        sources, kind, existing_taxonomy_hints=file_taxonomy_hints
+        bundle.sources, kind, existing_taxonomy_hints=file_taxonomy_hints
     )
     final_home, placement_mode = resolve_final_home(kind, suggested_home, top_candidates, autopilot=autopilot)
-    flags = sensitivity_flags(sources, metadata)
-    combined_for_tokens = " ".join(
-        text for source_name, text in sources.items() if source_name != "file"
-    )
-    if metadata:
-        metadata_summary = " ".join(flatten_text_values(metadata, limit=5000))
-        if metadata_summary:
-            combined_for_tokens += " " + metadata_summary
-    tokens = set(tokenize_for_summary(combined_for_tokens))
+    flags = sensitivity_flags(bundle.sources, bundle.metadata)
 
     record = FileRecord(
         path=str(path),
         kind=kind,
         mime=mime,
-        size=stat_result.st_size,
-        mtime=f"{stat_result.st_mtime:.0f}",
-        sources={k: v[:4000] for k, v in sources.items()},
-        metadata=metadata,
+        size=bundle.size,
+        mtime=bundle.mtime,
+        sources=bundle.sources,
+        metadata=bundle.metadata,
         top_candidates=top_candidates,
         suggested_home=suggested_home,
         taxonomy_hints=file_taxonomy_hints,
@@ -2198,10 +2632,10 @@ def scan_file(
         placement_mode=placement_mode,
         confidence=confidence,
         needs_refinement=needs_refinement,
-        flags=flags + notes,
-        tokens=sorted(tokens),
+        flags=flags + bundle.notes,
+        tokens=bundle.tokens,
     )
-    return record, tokens
+    return record, set(bundle.tokens)
 
 
 def walk_files(root: Path, include_ignored: bool = False) -> Iterable[Path]:
@@ -2220,7 +2654,7 @@ def walk_files(root: Path, include_ignored: bool = False) -> Iterable[Path]:
         for filename in filenames:
             if filename in {".DS_Store", ".localized", "Thumbs.db", "desktop.ini"}:
                 continue
-            if filename.startswith("."):
+            if filename.startswith(".") and filename.lower() not in PROJECT_MARKER_FILES:
                 continue
             if filename.startswith("._"):
                 continue
@@ -2293,6 +2727,8 @@ def json_output(
     root: Path,
     term_summary: list[dict[str, Any]],
     taxonomy_hints: dict[str, tuple[str, float, int]],
+    active_gate_failures: list[dict[str, Any]],
+    runtime_state: ScanRuntimeState,
 ) -> None:
     home_counts: Counter[str] = Counter()
     kind_counts: Counter[str] = Counter()
@@ -2313,6 +2749,10 @@ def json_output(
         "file_count": len(records),
         "low_confidence_count": low_confidence_count,
         "needs_refinement": low_confidence_count > 0,
+        "active_gate_failures": active_gate_failures,
+        "execution_blocked": bool(low_confidence_count or active_gate_failures),
+        "execution_ready": not bool(low_confidence_count or active_gate_failures),
+        "cache_stats": cache_stats(runtime_state),
         "home_counts": dict(home_counts),
         "kind_counts": dict(kind_counts),
         "project_terms": term_summary,
@@ -2348,6 +2788,9 @@ def manifest_output(
     root: Path,
     term_summary: list[dict[str, Any]],
     taxonomy_hints: dict[str, tuple[str, float, int]],
+    active_gate_failures: list[dict[str, Any]],
+    entry_gate_failures: dict[str, list[dict[str, Any]]],
+    runtime_state: ScanRuntimeState,
     autopilot: bool = False,
     refinement_iterations: list[dict[str, Any]] | None = None,
 ) -> None:
@@ -2380,17 +2823,22 @@ def manifest_output(
         "file_count": len(records),
         "low_confidence_count": len(low_confidence),
         "needs_refinement": len(low_confidence) > 0,
-        "execution_blocked": len(low_confidence) > 0,
+        "active_gate_failures": active_gate_failures,
+        "execution_blocked": bool(len(low_confidence) > 0 or active_gate_failures),
         "execution_mode": "autopilot" if autopilot else "review_mode",
         "manifest_iterations": refinement_iterations,
+        "cache_stats": cache_stats(runtime_state),
         "project_terms": term_summary,
         "taxonomy_hints": summarize_taxonomy_seeds(taxonomy_hints),
-        "entries": [build_manifest_entry(rec) for rec in records],
+        "entries": [
+            build_manifest_entry(rec, entry_gate_failures=entry_gate_failures.get(rec.path, []))
+            for rec in records
+        ],
         "low_confidence": low_confidence,
         "next_actions": {
-            "requires_refinement_pass": len(low_confidence) > 0,
-            "description": "Re-run semantic scan to tighten low-confidence assignments until low_confidence_count reaches 0 or stabilizes",
-            "execution_ready": len(low_confidence) == 0,
+            "requires_refinement_pass": bool(len(low_confidence) > 0 or active_gate_failures),
+            "description": "Re-run semantic scan/controller reconciliation until low_confidence_count reaches 0 and active_gate_failures is empty",
+            "execution_ready": not bool(len(low_confidence) > 0 or active_gate_failures),
         },
     }
     json.dump(payload, sys.stdout, indent=2, ensure_ascii=False)
@@ -2403,6 +2851,7 @@ def scan_records_with_hints(
     taxonomy_hints: dict[str, tuple[str, float, int]],
     autopilot: bool,
     vision: bool,
+    runtime_state: ScanRuntimeState,
 ) -> tuple[list[FileRecord], list[dict[str, Any]], dict[str, set[str]]]:
     records: list[FileRecord] = []
     file_tokens: dict[str, set[str]] = {}
@@ -2415,6 +2864,7 @@ def scan_records_with_hints(
                 path,
                 root=root,
                 taxonomy_hints=taxonomy_hints,
+                runtime_state=runtime_state,
                 autopilot=autopilot,
                 vision=vision,
             )
@@ -2498,6 +2948,7 @@ def main() -> int:
         return 2
 
     paths = list(walk_files(root, include_ignored=args.include_ignored))
+    runtime_state = ScanRuntimeState(project_markers=collect_project_markers(root))
 
     if args.vision:
         set_vision_provider(args.vision_provider, args.vision_model)
@@ -2510,11 +2961,20 @@ def main() -> int:
             print(f"Vision check: {json.dumps(vision_status, ensure_ascii=False)}", file=sys.stderr)
             return 2
 
-    base_taxonomy_hints = collect_existing_taxonomy_hints(paths, root)
+    base_taxonomy_hints = collect_existing_taxonomy_hints(
+        paths,
+        root,
+        project_markers=runtime_state.project_markers,
+    )
     taxonomy_hints = dict(base_taxonomy_hints)
 
     records, term_summary, _ = scan_records_with_hints(
-        paths, root=root, taxonomy_hints=taxonomy_hints, autopilot=args.autopilot, vision=args.vision
+        paths,
+        root=root,
+        taxonomy_hints=taxonomy_hints,
+        autopilot=args.autopilot,
+        vision=args.vision,
+        runtime_state=runtime_state,
     )
 
     refinement_iterations = [
@@ -2548,7 +3008,12 @@ def main() -> int:
                 break
 
             next_records, next_term_summary, _ = scan_records_with_hints(
-                paths, root=root, taxonomy_hints=merged_hints, autopilot=args.autopilot, vision=args.vision
+                paths,
+                root=root,
+                taxonomy_hints=merged_hints,
+                autopilot=args.autopilot,
+                vision=args.vision,
+                runtime_state=runtime_state,
             )
             next_low_confidence = sum(1 for record in next_records if record.needs_refinement)
             refinement_iterations.append(
@@ -2573,14 +3038,30 @@ def main() -> int:
             if previous_low_confidence == 0:
                 break
 
+    active_gate_failures, entry_gate_failures = validate_manifest_gates(
+        records,
+        root,
+        runtime_state.project_markers,
+    )
+
     if args.json:
-        json_output(records, root, term_summary, taxonomy_hints)
+        json_output(
+            records,
+            root,
+            term_summary,
+            taxonomy_hints,
+            active_gate_failures,
+            runtime_state,
+        )
     elif args.manifest:
         manifest_output(
             records,
             root,
             term_summary,
             taxonomy_hints,
+            active_gate_failures,
+            entry_gate_failures,
+            runtime_state,
             autopilot=args.autopilot,
             refinement_iterations=refinement_iterations,
         )

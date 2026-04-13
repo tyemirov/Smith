@@ -5,11 +5,13 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
 SCANNER = ROOT.parent / "scripts" / "semantic_scan.py"
+CONTROLLER = ROOT.parent / "scripts" / "run_tidy_folder.py"
 SETUP = ROOT / "setup_fixtures.sh"
 UV = Path("/opt/homebrew/bin/uv")
 
@@ -26,6 +28,38 @@ def run_manifest(fixture: Path) -> dict:
         text=True,
     )
     return json.loads(proc.stdout)
+
+
+def run_temp_manifest(files: dict[str, str]) -> dict:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        for relative_path, content in files.items():
+            path = root / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        return run_manifest(root)
+
+
+def run_controller(files: dict[str, str]) -> dict:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        for relative_path, content in files.items():
+            path = root / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(CONTROLLER), str(root)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        report = json.loads(proc.stdout)
+        assert Path(report["snapshot_path"]).exists()
+        assert Path(report["manifest_path"]).exists()
+        assert Path(report["approved_actions_path"]).exists()
+        for handoff_path in report["handoff_paths"].values():
+            assert Path(handoff_path).exists()
+        return report
 
 
 def entry_map(payload: dict) -> dict[str, dict]:
@@ -68,6 +102,7 @@ def main() -> int:
 
     assert polluted["meeting-notes-standup.docx"]["proposed_destination"] == "Projects/Code"
     assert polluted["package.json"]["proposed_destination"] == "Projects/Code"
+    assert payloads["polluted-project"]["cache_stats"]["hits"] > 0
 
     assert retiree["statement.xlsx"]["kind"] == "xlsx"
     assert retiree["statement.xlsx"]["proposed_destination"] == "Finance/Investments"
@@ -76,6 +111,49 @@ def main() -> int:
     if shutil.which("tesseract"):
         assert retiree["scan-001.png"]["proposed_destination"] == "Identity/Passport"
         assert evidence_contains(retiree["scan-001.png"], "ocr", "passport")
+
+    hidden_marker_payload = run_temp_manifest(
+        {
+            ".gitignore": "node_modules/\ndist/\n",
+            "notes.txt": "prototype walkthrough for demo recording\n",
+        }
+    )
+    hidden_marker_entries = entry_map(hidden_marker_payload)
+    assert hidden_marker_entries[".gitignore"]["proposed_destination"] == "Projects/Code"
+    assert any(
+        hint.get("source") == "project_markers"
+        for hint in hidden_marker_entries["notes.txt"]["attribution"].get("taxonomy_hints", [])
+    )
+    assert any(
+        "project_markers:Projects/Code" in alternative.get("evidence", [])
+        for alternative in hidden_marker_entries["notes.txt"].get("alternatives", [])
+    )
+    assert hidden_marker_entries["notes.txt"]["proposed_destination"] is None
+    assert hidden_marker_payload["execution_blocked"] is True
+
+    generic_projects_payload = run_temp_manifest(
+        {"demo-notes.txt": "prototype walkthrough for demo recording\n"}
+    )
+    generic_projects_entry = entry_map(generic_projects_payload)["demo-notes.txt"]
+    assert generic_projects_payload["execution_blocked"] is True
+    assert generic_projects_payload["next_actions"]["execution_ready"] is False
+    assert generic_projects_entry["proposed_destination"] is None
+    assert {
+        failure["code"] for failure in generic_projects_payload["active_gate_failures"]
+    } >= {"low_confidence_remaining", "specificity_required"}
+
+    controller_report = run_controller(
+        {"demo-notes.txt": "prototype walkthrough for demo recording\n"}
+    )
+    assert controller_report["execution_ready"] is False
+    assert controller_report["active_gate_failures"]
+    assert set(controller_report["handoff_paths"]) == {
+        "preflight",
+        "scout",
+        "gatekeeper",
+        "executor",
+        "audit",
+    }
 
     print(
         "freelance-designer:",

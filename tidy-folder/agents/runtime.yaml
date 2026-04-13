@@ -14,7 +14,7 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.3-codex-spark"
     reasoning_effort: "low"
-    scope: "Create/validate rollback snapshot context, parse user target path, and confirm required tooling preconditions. Return passable preflight checklist."
+    scope: "Create/validate rollback snapshot context, parse user target path, and confirm required tooling preconditions. Persist the preflight handoff under .tidy-folder-snapshots/<snapshot_id>/handoffs/."
     controller_handoff: "Only continue if target folder exists, snapshot directory policy is clear, and no conflicting move operation is already in-flight."
 
   - id: "tidy-folder-scout"
@@ -23,7 +23,7 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.4-mini"
     reasoning_effort: "medium"
-    scope: "Run semantic_scan manifest/autopilot passes as evidence collectors, produce structured low-confidence lists and per-file signals. No destination finalization."
+    scope: "Run semantic_scan manifest/autopilot passes as evidence collectors, persist manifest.json, and produce structured low-confidence lists plus per-file signals. No destination finalization."
     controller_handoff: "Return manifest file path, low_confidence count, and evidence packets only. If low_confidence is unchanged or high, explicitly request reconciliation pass or escalation."
 
   - id: "tidy-folder-router"
@@ -32,7 +32,7 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.4"
     reasoning_effort: "medium"
-    scope: "Convert scout evidence to proposed manifest entries, apply specificity ladder, enforce existing taxonomy anchors, and generate explicit rationale/alternatives for each candidate."
+    scope: "Convert scout evidence to proposed manifest entries, apply specificity ladder, enforce existing taxonomy anchors, and generate explicit rationale/alternatives for each candidate. Approved actions must be written as a concrete artifact, not kept only in memory."
     controller_handoff: "Submit finalized manifest candidate set plus unresolved blockers. Do not approve execution unless all hard blockers are addressed in this handoff."
 
   - id: "tidy-folder-gatekeeper"
@@ -41,7 +41,7 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.3-codex-spark"
     reasoning_effort: "medium"
-    scope: "Validate manifest against hard gates: low_confidence_count==0, no needs_refinement actions, no banned or vague top-level categories, no duplicate taxonomy intent, no X/X nesting, project atomicity intact, and cross-domain tie-breaks explicit."
+    scope: "Validate manifest against hard gates: low_confidence_count==0, no needs_refinement actions, no banned or vague top-level categories, no duplicate taxonomy intent, no X/X nesting, project atomicity intact, and cross-domain tie-breaks explicit. Persist active_gate_failures in the gatekeeper handoff."
     controller_handoff: "Approval is only valid when all gate checks are green and active_gate_failures is empty. If blocked, provide a concrete correction list and stop."
 
   - id: "tidy-folder-executor"
@@ -50,7 +50,7 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.3-codex-spark"
     reasoning_effort: "low"
-    scope: "Execute moves, renames, and deterministic cleanup only under supervisor-approved, gatekeeper-cleared manifest. Emit action deltas and post-move verification stats."
+    scope: "Execute moves, renames, and deterministic cleanup only under supervisor-approved, gatekeeper-cleared manifest. Emit action deltas and post-move verification stats into the executor handoff."
     controller_handoff: "Report skipped/failed moves, touched paths, and manifest delta. Halt if any operation violates target root, snapshot contract, or post-move drift." 
 
   - id: "tidy-folder-audit-and-report"
