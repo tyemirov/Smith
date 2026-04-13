@@ -73,6 +73,14 @@ def find_entry(payload: dict, filename: str) -> dict:
     raise KeyError(filename)
 
 
+def find_entry_by_suffix(payload: dict, suffix: str) -> dict:
+    normalized = suffix.replace("\\", "/")
+    for entry in payload["entries"]:
+        if Path(entry["source_path"]).as_posix().endswith(normalized):
+            return entry
+    raise KeyError(suffix)
+
+
 def evidence_contains(entry: dict, prefix: str, token: str) -> bool:
     needle = f"{prefix}:{token}"
     return any(needle == item or needle in item for item in entry.get("evidence", []))
@@ -130,6 +138,34 @@ def main() -> int:
     )
     assert hidden_marker_entries["notes.txt"]["proposed_destination"] is None
     assert hidden_marker_payload["execution_blocked"] is True
+
+    multi_project_payload = run_temp_manifest(
+        {
+            "moving_map/package.json": '{"name":"moving_map"}\n',
+            "moving_map/README.md": "# moving_map\ninteractive map prototype\n",
+            "moving_map/src/index.ts": "export const app = 'moving_map';\n",
+            "chess-p2p/package.json": '{"name":"chess-p2p"}\n',
+            "chess-p2p/README.md": "# chess-p2p\npeer to peer chess demo\n",
+            "chess-p2p/src/index.ts": "export const app = 'chess-p2p';\n",
+        }
+    )
+    moving_map_package = find_entry_by_suffix(multi_project_payload, "moving_map/package.json")
+    chess_package = find_entry_by_suffix(multi_project_payload, "chess-p2p/package.json")
+    moving_map_readme = find_entry_by_suffix(multi_project_payload, "moving_map/README.md")
+    chess_readme = find_entry_by_suffix(multi_project_payload, "chess-p2p/README.md")
+    assert moving_map_package["proposed_destination"] == "Projects/Moving-Map"
+    assert chess_package["proposed_destination"] == "Projects/Chess-P2P"
+    assert moving_map_readme["proposed_destination"] == "Projects/Moving-Map"
+    assert chess_readme["proposed_destination"] == "Projects/Chess-P2P"
+
+    nested_generic_payload = run_temp_manifest(
+        {"Work/Projects/demo-notes.txt": "prototype walkthrough for demo recording\n"}
+    )
+    nested_generic_entry = entry_map(nested_generic_payload)["demo-notes.txt"]
+    assert nested_generic_entry["proposed_destination"] is None
+    assert {
+        failure["code"] for failure in nested_generic_payload["active_gate_failures"]
+    } >= {"low_confidence_remaining", "specificity_required"}
 
     generic_projects_payload = run_temp_manifest(
         {"demo-notes.txt": "prototype walkthrough for demo recording\n"}
