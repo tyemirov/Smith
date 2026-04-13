@@ -1114,9 +1114,13 @@ def normalized_destination_segment(segment: str) -> str:
 
 def home_requires_specificity(home: str | None) -> bool:
     parts = split_home(home)
-    if len(parts) != 1:
+    if not parts:
         return False
-    return normalized_destination_segment(parts[0]) in SPECIFICITY_BLOCKED_DESTINATIONS
+
+    normalized = [normalized_destination_segment(part) for part in parts]
+    if len(normalized) == 1:
+        return normalized[0] in SPECIFICITY_BLOCKED_DESTINATIONS
+    return normalized[-1] in SPECIFICITY_BLOCKED_DESTINATIONS
 
 
 def home_has_redundant_nesting(home: str | None) -> bool:
@@ -1179,6 +1183,23 @@ def nearest_project_marker_key(
     return None
 
 
+def display_project_home(scope_parts: tuple[str, ...]) -> str:
+    if not scope_parts:
+        return "Projects/Code"
+
+    label_parts = [part for part in re.split(r"[^A-Za-z0-9]+", scope_parts[-1]) if part]
+    if not label_parts:
+        return "Projects/Code"
+
+    pretty = "-".join(
+        part.upper()
+        if part.isupper() or part.isdigit() or any(char.isdigit() for char in part)
+        else part[:1].upper() + part[1:]
+        for part in label_parts
+    )
+    return f"Projects/{pretty}"
+
+
 def infer_project_marker_hints(
     path: Path,
     root: Path,
@@ -1188,14 +1209,20 @@ def infer_project_marker_hints(
         return []
 
     best_hint: dict[str, Any] | None = None
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        return []
+
     for key, depth in ancestor_keys(path, root):
         markers = project_markers.get(key)
         if not markers:
             continue
 
+        scope_parts = rel.parts[:depth]
         weight = 1.8 + sum(PROJECT_MARKER_WEIGHTS.get(marker, 2.5) for marker in markers) + (depth * 0.3)
         hint = {
-            "home": "Projects/Code",
+            "home": display_project_home(scope_parts),
             "weight": round(min(weight, 9.5), 2),
             "support_files": len(markers),
             "source": "project_markers",
@@ -2197,7 +2224,7 @@ def collect_existing_taxonomy_hints(
         if not is_meaningful_taxonomy_segment(parts[-1]):
             continue
         marker_counts[key] += len(markers)
-        canonical_by_key.setdefault(key, "/".join(parts))
+        canonical_by_key[key] = display_project_home(parts)
 
     hints: dict[str, tuple[str, float, int]] = {}
     for key, count in raw_counts.items():
@@ -2349,6 +2376,14 @@ def score_record(
         key: value * WEAK_CONTEXT_SOURCE_SCALE.get(key, 1.0)
         for key, value in SOURCE_WEIGHTS.items()
     } if project_hint_weight < TAXONOMY_HINT_PROJECT_CONTEXT_THRESHOLD else dict(SOURCE_WEIGHTS)
+    specific_project_home = next(
+        (
+            str(hint.get("home"))
+            for hint in existing_taxonomy_hints or []
+            if hint.get("source") == "project_markers" and hint.get("home") not in {None, "Projects", "Projects/Code"}
+        ),
+        None,
+    )
 
     candidate_scores: dict[str, dict[str, Any]] = defaultdict(lambda: {"score": 0.0, "evidence": []})
 
@@ -2358,8 +2393,13 @@ def score_record(
             candidate_scores[home]["score"] += float(hint["weight"])
             source = str(hint.get("source") or "taxonomy")
             candidate_scores[home]["evidence"].append(f"{source}:{home}")
+    if specific_project_home:
+        candidate_scores[specific_project_home]["score"] += 2.0
+        candidate_scores[specific_project_home]["evidence"].append("project_marker_bias")
 
     for rule in RULES:
+        if specific_project_home and rule.home in {"Projects", "Projects/Code"}:
+            continue
         score = 0.0
         evidence: list[str] = []
         for source_name, source_text in record_sources.items():

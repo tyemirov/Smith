@@ -3,9 +3,9 @@ version: 1
 controller:
   execution: "inherit"
   responsibilities:
-    - "Own the full tidy-folder pass state, pass counters, and artifact custody (snapshot paths, manifest files, logs)."
+    - "Own the full tidy-folder pass state, pass counters, and artifact custody (snapshot paths, manifest files, logs, and supervisor handoff history)."
     - "Do not proceed to move execution unless Gatekeeper signs off and the manifest is approved with zero low-confidence."
-    - "Halt immediately on any hard gate failure and request explicit remediation steps only."
+    - "If execution runs, persist a post-move audit manifest before closing the flow."
 
 steps:
   - id: "tidy-folder-preflight"
@@ -59,5 +59,5 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.4-mini"
     reasoning_effort: "medium"
-    scope: "Run final tree audit, produce completion ledger including pass count, refinement history, and gate outcomes. Ensure final tree is user-readable and deterministic."
+    scope: "Run final tree audit, produce completion ledger including pass count, refinement history, gate outcomes, and any post-move verification manifest. Ensure final tree is user-readable and deterministic."
     controller_handoff: "Return final signed completion report or residual unresolved risks for explicit user confirmation." 

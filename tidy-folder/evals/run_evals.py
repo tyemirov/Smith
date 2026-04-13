@@ -40,15 +40,18 @@ def run_temp_manifest(files: dict[str, str]) -> dict:
         return run_manifest(root)
 
 
-def run_controller(files: dict[str, str]) -> dict:
+def run_controller(files: dict[str, str], *, execute: bool = False) -> dict:
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
         for relative_path, content in files.items():
             path = root / relative_path
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
+        command = [sys.executable, str(CONTROLLER), str(root)]
+        if execute:
+            command.append("--execute")
         proc = subprocess.run(
-            [sys.executable, str(CONTROLLER), str(root)],
+            command,
             check=True,
             capture_output=True,
             text=True,
@@ -59,6 +62,10 @@ def run_controller(files: dict[str, str]) -> dict:
         assert Path(report["approved_actions_path"]).exists()
         for handoff_path in report["handoff_paths"].values():
             assert Path(handoff_path).exists()
+        if execute:
+            assert report["executor_status"] == "executed"
+            assert report["post_move_manifest_path"]
+            assert Path(report["post_move_manifest_path"]).exists()
         return report
 
 
@@ -71,6 +78,14 @@ def find_entry(payload: dict, filename: str) -> dict:
         if Path(entry["source_path"]).name == filename:
             return entry
     raise KeyError(filename)
+
+
+def find_entry_by_suffix(payload: dict, suffix: str) -> dict:
+    normalized = suffix.replace("\\", "/")
+    for entry in payload["entries"]:
+        if Path(entry["source_path"]).as_posix().endswith(normalized):
+            return entry
+    raise KeyError(suffix)
 
 
 def evidence_contains(entry: dict, prefix: str, token: str) -> bool:
@@ -131,6 +146,34 @@ def main() -> int:
     assert hidden_marker_entries["notes.txt"]["proposed_destination"] is None
     assert hidden_marker_payload["execution_blocked"] is True
 
+    multi_project_payload = run_temp_manifest(
+        {
+            "moving_map/package.json": '{"name":"moving_map"}\n',
+            "moving_map/README.md": "# moving_map\ninteractive map prototype\n",
+            "moving_map/src/index.ts": "export const app = 'moving_map';\n",
+            "chess-p2p/package.json": '{"name":"chess-p2p"}\n',
+            "chess-p2p/README.md": "# chess-p2p\npeer to peer chess demo\n",
+            "chess-p2p/src/index.ts": "export const app = 'chess-p2p';\n",
+        }
+    )
+    moving_map_package = find_entry_by_suffix(multi_project_payload, "moving_map/package.json")
+    chess_package = find_entry_by_suffix(multi_project_payload, "chess-p2p/package.json")
+    moving_map_readme = find_entry_by_suffix(multi_project_payload, "moving_map/README.md")
+    chess_readme = find_entry_by_suffix(multi_project_payload, "chess-p2p/README.md")
+    assert moving_map_package["proposed_destination"] == "Projects/Moving-Map"
+    assert chess_package["proposed_destination"] == "Projects/Chess-P2P"
+    assert moving_map_readme["proposed_destination"] == "Projects/Moving-Map"
+    assert chess_readme["proposed_destination"] == "Projects/Chess-P2P"
+
+    nested_generic_payload = run_temp_manifest(
+        {"Work/Projects/demo-notes.txt": "prototype walkthrough for demo recording\n"}
+    )
+    nested_generic_entry = entry_map(nested_generic_payload)["demo-notes.txt"]
+    assert nested_generic_entry["proposed_destination"] is None
+    assert {
+        failure["code"] for failure in nested_generic_payload["active_gate_failures"]
+    } >= {"low_confidence_remaining", "specificity_required"}
+
     generic_projects_payload = run_temp_manifest(
         {"demo-notes.txt": "prototype walkthrough for demo recording\n"}
     )
@@ -148,12 +191,26 @@ def main() -> int:
     assert controller_report["execution_ready"] is False
     assert controller_report["active_gate_failures"]
     assert set(controller_report["handoff_paths"]) == {
+        "supervisor",
         "preflight",
         "scout",
+        "router",
         "gatekeeper",
         "executor",
         "audit",
     }
+
+    controller_execute_report = run_controller(
+        {
+            "inbox/tax-return.txt": "IRS tax return 2024\n",
+            "inbox/portfolio-summary.txt": "portfolio positions brokerage balance\n",
+        },
+        execute=True,
+    )
+    assert controller_execute_report["execution_ready"] is True
+    assert controller_execute_report["post_move_summary"]["low_confidence_count"] == 0
+    assert controller_execute_report["post_move_summary"]["active_gate_failures"] == []
+    assert "./inbox" in controller_execute_report["empty_dirs_removed"]
 
     print(
         "freelance-designer:",
