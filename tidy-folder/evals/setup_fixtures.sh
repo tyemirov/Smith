@@ -1,126 +1,24 @@
 #!/bin/bash
-# Creates synthetic test folders for tidy-folder skill evals.
-# Run from the evals/ directory: bash setup_fixtures.sh
+# Creates content-bearing test folders for tidy-folder skill evals.
 
-set -e
+set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "=== Setting up eval fixtures ==="
+/opt/homebrew/bin/uv run \
+  --with openpyxl \
+  --with Pillow \
+  --with mutagen \
+  "$SCRIPT_DIR/fixture_builder.py"
 
-# --- Eval 1: Freelance designer with kids ---
-DIR="$SCRIPT_DIR/fixtures/freelance-designer/test-folder"
-rm -rf "$DIR" && mkdir -p "$DIR"
+for fixture in \
+  "$SCRIPT_DIR/fixtures/freelance-designer/test-folder" \
+  "$SCRIPT_DIR/fixtures/polluted-project/test-folder" \
+  "$SCRIPT_DIR/fixtures/retiree-documents/test-folder"
+do
+  count="$(find "$fixture" -type f | wc -l | tr -d ' ')"
+  echo "  $(basename "$(dirname "$fixture")"): $count files"
+done
 
-# Messy mix of personal, kids, and client files
-touch "$DIR/invoice-acme-corp-march.pdf"
-touch "$DIR/invoice-acme-corp-april.pdf"
-touch "$DIR/alice-report-card-q2.pdf"
-touch "$DIR/peter-vaccination-record.pdf"
-touch "$DIR/logo-draft-v3.psd"
-touch "$DIR/logo-final.ai"
-touch "$DIR/client-brief-rebrand.docx"
-touch "$DIR/headshot-2024.jpg"
-touch "$DIR/family-photo-xmas.heic"
-touch "$DIR/mortgage-statement-feb.pdf"
-touch "$DIR/tax-return-2024.pdf"
-touch "$DIR/1099-freelance-2024.pdf"
-touch "$DIR/peter-math-worksheet.pdf"
-touch "$DIR/alice-art-class-schedule.pdf"
-touch "$DIR/dribbble-export.zip"
-touch "$DIR/figma-components.fig"
-touch "$DIR/pantone-color-guide.pdf"
-touch "$DIR/home-insurance-renewal.pdf"
-touch "$DIR/recipe-sourdough.pdf"
-touch "$DIR/dentist-appointment.ics"
-touch "$DIR/school-pickup-calendar.ics"
-touch "$DIR/IMG_4521.heic"
-touch "$DIR/IMG_4522.heic"
-touch "$DIR/IMG_4523.heic"
-touch "$DIR/screenshot-2024-03-15.png"
-touch "$DIR/screenshot-2024-03-18.png"
-mkdir -p "$DIR/Sorted/Documents" "$DIR/Sorted/Images" "$DIR/Sorted/PDFs"
-touch "$DIR/Sorted/Documents/random-notes.txt"
-touch "$DIR/Sorted/Images/old-photo.jpg"
-touch "$DIR/Sorted/PDFs/manual.pdf"
-
-echo "  Freelance designer fixture: $(find "$DIR" -type f | wc -l) files"
-
-# --- Eval 2: Polluted project folder ---
-DIR="$SCRIPT_DIR/fixtures/polluted-project/test-folder"
-rm -rf "$DIR" && mkdir -p "$DIR"
-
-# A real project with junk mixed in
-mkdir -p "$DIR/src/components" "$DIR/src/utils" "$DIR/node_modules/.package-lock" "$DIR/dist" "$DIR/.git/objects"
-touch "$DIR/package.json"
-touch "$DIR/package-lock.json"
-touch "$DIR/tsconfig.json"
-touch "$DIR/.gitignore"
-touch "$DIR/README.md"
-touch "$DIR/src/index.ts"
-touch "$DIR/src/components/Header.tsx"
-touch "$DIR/src/components/Footer.tsx"
-touch "$DIR/src/utils/helpers.ts"
-touch "$DIR/node_modules/.package-lock.json"
-touch "$DIR/dist/bundle.js"
-touch "$DIR/.git/objects/pack"
-# Junk that doesn't belong
-touch "$DIR/vacation-photo.heic"
-touch "$DIR/tax-2023.pdf"
-touch "$DIR/meeting-notes-standup.docx"
-touch "$DIR/screenshot 2024-01-15 at 3.45.12 PM.png"
-touch "$DIR/download.pdf"
-touch "$DIR/download (1).pdf"
-touch "$DIR/IMG_0042.MOV"
-touch "$DIR/recipe-from-mom.txt"
-touch "$DIR/src/random-invoice.pdf"
-touch "$DIR/src/components/cat-meme.jpg"
-
-echo "  Polluted project fixture: $(find "$DIR" -type f | wc -l) files"
-
-# --- Eval 3: Retiree documents ---
-DIR="$SCRIPT_DIR/fixtures/retiree-documents/test-folder"
-rm -rf "$DIR" && mkdir -p "$DIR"
-
-# Decades of accumulated files
-touch "$DIR/blood-test-results-2024.pdf"
-touch "$DIR/blood-test-results-2023.pdf"
-touch "$DIR/dr-smith-referral.pdf"
-touch "$DIR/prescription-metformin.pdf"
-touch "$DIR/medicare-card-scan.jpg"
-touch "$DIR/social-security-statement.pdf"
-touch "$DIR/401k-rollover-2020.pdf"
-touch "$DIR/pension-statement-q4-2024.pdf"
-touch "$DIR/tax-return-2024.pdf"
-touch "$DIR/tax-return-2023.pdf"
-touch "$DIR/tax-return-2022.pdf"
-touch "$DIR/property-tax-2024.pdf"
-touch "$DIR/home-deed.pdf"
-touch "$DIR/will-and-testament-2022.pdf"
-touch "$DIR/power-of-attorney.pdf"
-touch "$DIR/boeing-retirement-letter.pdf"
-touch "$DIR/patent-US7654321.pdf"
-touch "$DIR/engineering-portfolio-2015.pdf"
-touch "$DIR/cruise-tickets-alaska-2024.pdf"
-touch "$DIR/hotel-reservation-paris.pdf"
-touch "$DIR/passport-scan.jpg"
-touch "$DIR/grandkids-birthday-2024.heic"
-touch "$DIR/grandkids-recital-video.mp4"
-touch "$DIR/woodworking-plans-bookshelf.pdf"
-touch "$DIR/garden-layout-2024.pdf"
-touch "$DIR/hvac-maintenance-receipt.pdf"
-touch "$DIR/roof-inspection-2023.pdf"
-touch "$DIR/car-title-toyota.pdf"
-touch "$DIR/auto-insurance-renewal.pdf"
-touch "$DIR/cookbook-scan-grandma.pdf"
-touch "$DIR/random-download.pdf"
-touch "$DIR/IMG_1234.jpg"
-touch "$DIR/IMG_1235.jpg"
-mkdir -p "$DIR/Old Stuff" "$DIR/Misc" "$DIR/Documents"
-touch "$DIR/Old Stuff/resume-1998.doc"
-touch "$DIR/Misc/unknown.dat"
-touch "$DIR/Documents/notes.txt"
-
-echo "  Retiree documents fixture: $(find "$DIR" -type f | wc -l) files"
-
-echo ""
+echo
 echo "=== All fixtures ready ==="

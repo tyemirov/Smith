@@ -11,6 +11,8 @@
         "No top-level category named by file type: 'PDFs', 'Images', 'Spreadsheets', 'Videos'",
         "Kids-related files are under a 'Kids' category, not 'Personal' or 'Documents'",
         "Client work is separated from personal files",
+        "Spreadsheet content can drive Client-Work routing even when the filename is generic",
+        "Tagged audio metadata can drive Music routing even when the filename is generic",
         "No folder nesting deeper than 3 levels from root"
       ]
     },
@@ -34,7 +36,9 @@
         "No top-level category uses a banned vague name: 'Documents', 'Files', 'Data', 'Stuff', 'Personal', 'Misc', 'Resources', 'Assets', 'Materials', 'Media', 'General', 'Other', 'Archive', 'Old'",
         "Health/Medical records are a prominent top-level category",
         "Financial docs are separated by purpose (Taxes, Retirement, Banking)",
-        "Career docs are preserved but not dumped into a vague 'Old' or 'Archive' folder"
+        "Career docs are preserved but not dumped into a vague 'Old' or 'Archive' folder",
+        "Spreadsheet rows can drive Investments routing",
+        "OCR text from a generic image can drive Identity routing"
       ]
     }
   ]
