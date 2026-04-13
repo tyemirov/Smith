@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --with torch --with torchvision --script
+#!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
@@ -6,9 +6,6 @@
 #   "openpyxl>=3.1",
 #   "Pillow>=10.0",
 #   "pypdf>=5.0",
-#   "transformers>=4.41",
-#   "torch",
-#   "torchvision",
 # ]
 # ///
 """Semantic inventory scanner for tidy-folder.
@@ -873,6 +870,34 @@ def tool_exists(name: str) -> bool:
     return shutil.which(name) is not None
 
 
+def resolve_uv_binary() -> str | None:
+    for candidate in (os.environ.get("UV"), "/opt/homebrew/bin/uv", shutil.which("uv")):
+        if candidate and Path(candidate).exists():
+            return candidate
+    return None
+
+
+def ensure_hf_vision_runtime(argv: list[str]) -> None:
+    if hf_pipeline is not None or os.environ.get(HF_VISION_BOOTSTRAP_FLAG) == "1":
+        return
+
+    uv_binary = resolve_uv_binary()
+    if uv_binary is None:
+        print(
+            "error: --vision-provider hf requires uv plus the local vision dependencies, and no uv binary was found.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+    env = os.environ.copy()
+    env[HF_VISION_BOOTSTRAP_FLAG] = "1"
+    command = [uv_binary, "run"]
+    for dependency in HF_VISION_UV_DEPENDENCIES:
+        command.extend(["--with", dependency])
+    command.extend([str(Path(__file__).resolve()), *argv])
+    os.execvpe(uv_binary, command, env)
+
+
 def strip_quotes(value: str) -> str:
     value = value.strip()
     if len(value) >= 2 and ((value[0] == value[-1] == '"') or (value[0] == value[-1] == "'")):
@@ -881,6 +906,65 @@ def strip_quotes(value: str) -> str:
 
 
 PATTERN_REGEX_CACHE: dict[str, re.Pattern[str]] = {}
+CAMERA_STYLE_NAME_RE = re.compile(
+    r"^(img|dsc|pxl|mvimg|scan|vid|mov|screenshot)[-_]?\d",
+    re.IGNORECASE,
+)
+
+IMAGE_TEXT_HINTS = (
+    "app",
+    "bill",
+    "capture",
+    "certificate",
+    "deck",
+    "demo",
+    "document",
+    "form",
+    "id",
+    "identity",
+    "invoice",
+    "lab",
+    "license",
+    "mockup",
+    "passport",
+    "receipt",
+    "report",
+    "scan",
+    "screenshot",
+    "slide",
+    "slides",
+    "spec",
+    "statement",
+    "ui",
+    "walkthrough",
+    "worksheet",
+)
+
+VIDEO_TEXT_HINTS = (
+    "app",
+    "capture",
+    "chrome",
+    "demo",
+    "deck",
+    "meeting",
+    "prototype",
+    "screen recording",
+    "screen-recording",
+    "screencast",
+    "slides",
+    "tutorial",
+    "ui",
+    "walkthrough",
+    "webm",
+    "zoom",
+)
+
+HF_VISION_BOOTSTRAP_FLAG = "TIDY_FOLDER_HF_VISION_BOOTSTRAPPED"
+HF_VISION_UV_DEPENDENCIES = (
+    "transformers>=4.41",
+    "torch",
+    "torchvision",
+)
 
 
 def pattern_regex(pattern: str) -> re.Pattern[str]:
@@ -902,6 +986,65 @@ def pattern_in_text(pattern: str, text: str) -> bool:
     if not pattern or not text:
         return False
     return bool(pattern_regex(pattern).search(text))
+
+
+def likely_camera_style_name(path: Path) -> bool:
+    return bool(CAMERA_STYLE_NAME_RE.match(path.stem))
+
+
+def path_has_any_hint(path: Path, hints: Iterable[str]) -> bool:
+    lower = path.as_posix().lower()
+    return any(hint in lower for hint in hints)
+
+
+def likely_textual_image(path: Path) -> bool:
+    if path_has_any_hint(path, IMAGE_TEXT_HINTS):
+        return True
+
+    ext = path.suffix.lower()
+    if ext in {".png", ".gif", ".webp"} and not likely_camera_style_name(path):
+        return True
+
+    try:
+        with Image.open(path) as image:
+            width, height = image.size
+    except Exception:
+        return False
+
+    if width <= 0 or height <= 0:
+        return False
+
+    longer = max(width, height)
+    shorter = max(1, min(width, height))
+    aspect_ratio = longer / shorter
+    megapixels = (width * height) / 1_000_000
+    if aspect_ratio >= 1.55 and megapixels <= 10 and not likely_camera_style_name(path):
+        return True
+    return False
+
+
+def likely_textual_video(path: Path, metadata: dict[str, Any]) -> bool:
+    if path_has_any_hint(path, VIDEO_TEXT_HINTS):
+        return True
+
+    if path.suffix.lower() == ".webm" and not likely_camera_style_name(path):
+        return True
+
+    width = metadata.get("width")
+    height = metadata.get("height")
+    try:
+        width_value = int(width) if width is not None else 0
+        height_value = int(height) if height is not None else 0
+    except Exception:
+        width_value = 0
+        height_value = 0
+
+    if width_value > 0 and height_value > 0:
+        longer = max(width_value, height_value)
+        shorter = max(1, min(width_value, height_value))
+        if (longer / shorter) >= 1.6 and not likely_camera_style_name(path):
+            return True
+    return False
 
 
 def flatten_text_values(value: Any, limit: int = 400) -> list[str]:
@@ -971,9 +1114,13 @@ def normalized_destination_segment(segment: str) -> str:
 
 def home_requires_specificity(home: str | None) -> bool:
     parts = split_home(home)
-    if len(parts) != 1:
+    if not parts:
         return False
-    return normalized_destination_segment(parts[0]) in SPECIFICITY_BLOCKED_DESTINATIONS
+
+    normalized = [normalized_destination_segment(part) for part in parts]
+    if len(normalized) == 1:
+        return normalized[0] in SPECIFICITY_BLOCKED_DESTINATIONS
+    return normalized[-1] in SPECIFICITY_BLOCKED_DESTINATIONS
 
 
 def home_has_redundant_nesting(home: str | None) -> bool:
@@ -1036,6 +1183,23 @@ def nearest_project_marker_key(
     return None
 
 
+def display_project_home(scope_parts: tuple[str, ...]) -> str:
+    if not scope_parts:
+        return "Projects/Code"
+
+    label_parts = [part for part in re.split(r"[^A-Za-z0-9]+", scope_parts[-1]) if part]
+    if not label_parts:
+        return "Projects/Code"
+
+    pretty = "-".join(
+        part.upper()
+        if part.isupper() or part.isdigit() or any(char.isdigit() for char in part)
+        else part[:1].upper() + part[1:]
+        for part in label_parts
+    )
+    return f"Projects/{pretty}"
+
+
 def infer_project_marker_hints(
     path: Path,
     root: Path,
@@ -1045,14 +1209,20 @@ def infer_project_marker_hints(
         return []
 
     best_hint: dict[str, Any] | None = None
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        return []
+
     for key, depth in ancestor_keys(path, root):
         markers = project_markers.get(key)
         if not markers:
             continue
 
+        scope_parts = rel.parts[:depth]
         weight = 1.8 + sum(PROJECT_MARKER_WEIGHTS.get(marker, 2.5) for marker in markers) + (depth * 0.3)
         hint = {
-            "home": "Projects/Code",
+            "home": display_project_home(scope_parts),
             "weight": round(min(weight, 9.5), 2),
             "support_files": len(markers),
             "source": "project_markers",
@@ -1931,17 +2101,24 @@ def extract_sources(
         image_metadata = extract_image_metadata(path)
         if image_metadata:
             metadata.update(image_metadata)
-        ocr = extract_image_ocr(path)
-        if ocr:
-            sources["ocr"] = ocr.lower()
-        else:
-            notes.append("no_image_ocr")
-        if vision_enabled:
-            vision = extract_image_vision_caption(path)
-            if vision:
-                sources["vision"] = vision.lower()
+        image_supports_text_extraction = likely_textual_image(path)
+        if image_supports_text_extraction:
+            ocr = extract_image_ocr(path)
+            if ocr:
+                sources["ocr"] = ocr.lower()
             else:
-                notes.append("no_image_vision")
+                notes.append("no_image_ocr")
+        else:
+            notes.append("skipped_image_ocr_low_signal")
+        if vision_enabled:
+            if image_supports_text_extraction:
+                vision = extract_image_vision_caption(path)
+                if vision:
+                    sources["vision"] = vision.lower()
+                else:
+                    notes.append("no_image_vision")
+            else:
+                notes.append("skipped_image_vision_low_signal")
     elif kind in {"video", "audio"}:
         metadata = parse_ffprobe(path)
         fallback_metadata = parse_mutagen_media(path)
@@ -1950,17 +2127,24 @@ def extract_sources(
         if metadata:
             metadata["kind"] = kind
         if kind == "video":
-            ocr = extract_video_frame_ocr(path, metadata)
-            if ocr:
-                sources["ocr"] = ocr.lower()
-            else:
-                notes.append("no_video_ocr")
-            if vision_enabled:
-                vision = extract_video_frame_vision(path, metadata)
-                if vision:
-                    sources["vision"] = vision.lower()
+            video_supports_text_extraction = likely_textual_video(path, metadata)
+            if video_supports_text_extraction:
+                ocr = extract_video_frame_ocr(path, metadata)
+                if ocr:
+                    sources["ocr"] = ocr.lower()
                 else:
-                    notes.append("no_video_vision")
+                    notes.append("no_video_ocr")
+            else:
+                notes.append("skipped_video_ocr_low_signal")
+            if vision_enabled:
+                if video_supports_text_extraction:
+                    vision = extract_video_frame_vision(path, metadata)
+                    if vision:
+                        sources["vision"] = vision.lower()
+                    else:
+                        notes.append("no_video_vision")
+                else:
+                    notes.append("skipped_video_vision_low_signal")
     elif kind == "archive":
         notes.append("archive_unreadable")
 
@@ -2040,7 +2224,7 @@ def collect_existing_taxonomy_hints(
         if not is_meaningful_taxonomy_segment(parts[-1]):
             continue
         marker_counts[key] += len(markers)
-        canonical_by_key.setdefault(key, "/".join(parts))
+        canonical_by_key[key] = display_project_home(parts)
 
     hints: dict[str, tuple[str, float, int]] = {}
     for key, count in raw_counts.items():
@@ -2192,6 +2376,14 @@ def score_record(
         key: value * WEAK_CONTEXT_SOURCE_SCALE.get(key, 1.0)
         for key, value in SOURCE_WEIGHTS.items()
     } if project_hint_weight < TAXONOMY_HINT_PROJECT_CONTEXT_THRESHOLD else dict(SOURCE_WEIGHTS)
+    specific_project_home = next(
+        (
+            str(hint.get("home"))
+            for hint in existing_taxonomy_hints or []
+            if hint.get("source") == "project_markers" and hint.get("home") not in {None, "Projects", "Projects/Code"}
+        ),
+        None,
+    )
 
     candidate_scores: dict[str, dict[str, Any]] = defaultdict(lambda: {"score": 0.0, "evidence": []})
 
@@ -2201,8 +2393,13 @@ def score_record(
             candidate_scores[home]["score"] += float(hint["weight"])
             source = str(hint.get("source") or "taxonomy")
             candidate_scores[home]["evidence"].append(f"{source}:{home}")
+    if specific_project_home:
+        candidate_scores[specific_project_home]["score"] += 2.0
+        candidate_scores[specific_project_home]["evidence"].append("project_marker_bias")
 
     for rule in RULES:
+        if specific_project_home and rule.home in {"Projects", "Projects/Code"}:
+            continue
         score = 0.0
         evidence: list[str] = []
         for source_name, source_text in record_sources.items():
@@ -2942,6 +3139,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.vision and args.vision_provider == "hf":
+        ensure_hf_vision_runtime(sys.argv[1:])
+
     root = Path(args.root).expanduser().resolve()
     if not root.exists():
         print(f"error: path does not exist: {root}", file=sys.stderr)

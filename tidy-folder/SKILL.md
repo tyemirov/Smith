@@ -56,7 +56,7 @@ Use the `scripts/semantic_scan.py` helper when it is available. Its job is to ga
 - Candidate homes with evidence and confidence.
 - The contract is to infer a complete taxonomy end-to-end with no manual routing decisions.
 
-Use `scripts/run_tidy_folder.py` for the full end-to-end workflow when you need the runtime contract, not just the evidence collector. It creates the rollback snapshot, persists the manifest, emits supervisor/gatekeeper handoff artifacts, and can optionally execute approved moves once the gates are green.
+Use `scripts/run_tidy_folder.py` for the full end-to-end workflow when you need the runtime contract, not just the evidence collector. It creates the rollback snapshot, persists the manifest, emits supervisor/router/gatekeeper/executor/audit handoff artifacts, and can optionally execute approved moves once the gates are green.
 
 ### Dependency and execution model
 
@@ -77,7 +77,7 @@ python3 ./scripts/run_tidy_folder.py /path/to/folder
 python3 ./scripts/run_tidy_folder.py /path/to/folder --execute
 ```
 
-- The script uses a `uv` shebang (`#!/usr/bin/env -S uv run --with torch --with torchvision --script`) and declares Python requirements inline, so dependencies are resolved automatically.
+- The script uses a lightweight `uv` shebang (`#!/usr/bin/env -S uv run --script`) and declares its baseline Python requirements inline, so ordinary non-vision scans do not pay the local vision-model install cost.
 - Vision mode is opt-in and explicit (recommended for images/videos):
 
 ```bash
@@ -85,12 +85,12 @@ uv run ./scripts/semantic_scan.py /path/to/folder --manifest --autopilot --visio
 uv run ./scripts/semantic_scan.py /path/to/folder --manifest --autopilot --vision --vision-provider openai
 ```
 
-- Vision dependencies are available via the `uv` launcher; enable multimodal captioning explicitly with `--vision`. Use `--vision-provider openai` to run image/video understanding through an API model (requires `OPENAI_API_KEY`) instead of local BLIP/CLIP-style captioning.
+- Vision mode stays opt-in. When you request `--vision --vision-provider hf`, the script bootstraps the extra local `transformers`/`torch` runtime on demand through `uv`; use `--vision-provider openai` to route image/video understanding through an API model instead (requires `OPENAI_API_KEY`).
 
 Native tools like `ffmpeg`, `pdftotext`, `tesseract`, `mdls`, `file`, `strings`, and `antiword` are optional accelerators. If a machine does not have them, the scanner still works, but some files will stay low-confidence until enough evidence is available.
 
 Treat the script as an evidence collector. The skill produces the inferred taxonomy without user intervention.
-- `needs_review` is not part of the execution contract. Files are flagged as `low_confidence` and fed through additional automatic refinement passes until `low_confidence` is fully resolved.
+- `needs_review` is not part of the execution contract. Files are flagged as `low_confidence` and fed through automatic refinement passes up to a capped limit; if unresolved blockers remain after the capped passes, execution stays blocked and the controller persists the blocker artifacts for the next run.
 - Any `low_confidence` classification is a hard blocker. No moves are allowed until the manifest reports `low_confidence_count: 0`.
 - Low-confidence manifest entries are non-routable by design: keep their evidence and candidates, but leave `proposed_destination` empty until refinement resolves them.
 
@@ -154,9 +154,9 @@ The validation gates defined in this workflow are the only stopping points.
 Do not ask "should I proceed?" or "should I continue?" at intermediate steps.
 Report the final outcome when the workflow completes or a gate stops it.
 
-This workflow is autopilot-first: no human review cycle is required. Low-confidence placements are emitted in the manifest as actionable refinement candidates and are iterated automatically to raise confidence to zero before finalization.
-**Hard stop rule:** any non-zero low-confidence count is a hard failure for execution; no file moves occur until `low_confidence_count` reaches zero.
-When running `semantic_scan.py --manifest --autopilot`, the script now performs an internal refinement loop: it uses high-confidence placements from prior passes as additional taxonomy seeds, then re-runs up to a capped number of passes until low-confidence count stabilizes or reaches zero.
+This workflow is autopilot-first: no human review cycle is required. Low-confidence placements are emitted in the manifest as actionable refinement candidates and are iterated automatically inside the capped refinement budget before finalization.
+**Hard stop rule:** any non-zero low-confidence count after the capped refinement passes is a hard failure for execution; no file moves occur until `low_confidence_count` reaches zero.
+When running `semantic_scan.py --manifest --autopilot`, the script performs an internal refinement loop: it uses high-confidence placements from prior passes as additional taxonomy seeds, then re-runs up to a capped number of passes until low-confidence count stabilizes or reaches zero.
 
 ## Workflow Overview
 
@@ -298,16 +298,16 @@ cd /Users/tyemirov/Development/agentSkills/tidy-folder
 python3 ./scripts/run_tidy_folder.py <target-folder>
 ```
 
-The controller writes its manifest and handoff records into `./.tidy-folder-snapshots/<snapshot_id>/` inside the target folder, including `manifest.json`, `approved-actions.json`, and per-phase handoff files.
+The controller writes its manifest and handoff records into `./.tidy-folder-snapshots/<snapshot_id>/` inside the target folder, including `manifest.json`, `approved-actions.json`, `handoffs/00-supervisor.json`, and the per-phase handoff files for preflight, scout, router, gatekeeper, executor, and audit. When execution runs, it also writes a post-move audit manifest.
 
 Build the manifest as an iterative artifact:
 - Round 1 must include: source path, proposed destination, evidence source list, and attribution source (`existing_taxonomy`, `filename`, `content`, `metadata`, `ocr`).
 - If an entry is still low-confidence, keep `proposed_destination` empty and surface candidate homes separately; do not emit a fallback destination.
 - Use existing taxonomy as round seeds for scoring; then apply the manifest and regenerate in passes.
-- Continue until `low_confidence` is **zero** and no high-confidence blockers remain.
+- Continue automatic refinement through the capped pass budget; if `low_confidence` is still non-zero or any gate blockers remain, execution must stay blocked and the unresolved entries must remain explicit in the manifest.
 
 Hard execution gate:
-- Re-run the manifest pass after each reconciliation if `low_confidence_count > 0`.
+- Re-run the manifest pass after each reconciliation while you are still within the capped refinement budget and `low_confidence_count > 0`.
 - Execute moves only when the manifest resolves to `low_confidence_count == 0`.
 
 - For each candidate file/folder group, record:
