@@ -206,23 +206,6 @@ PROJECT_STOP_TOKENS = {
     "htm",
 }
 
-AUTOPILOT_FALLBACKS = {
-    "image": "Unresolved/Media-Unknown",
-    "video": "Unresolved/Media-Unknown",
-    "audio": "Unresolved/Media-Unknown",
-    "pdf": "Unresolved/Documents-Unknown",
-    "docx": "Unresolved/Documents-Unknown",
-    "pptx": "Unresolved/Documents-Unknown",
-    "xlsx": "Unresolved/Documents-Unknown",
-    "legacy-office": "Unresolved/Documents-Unknown",
-    "text": "Unresolved/Documents-Unknown",
-    "csv": "Unresolved/Documents-Unknown",
-    "json": "Unresolved/Documents-Unknown",
-    "archive": "Unresolved/Archive-Unknown",
-    "binary": "Unresolved/Unmapped",
-    "unreadable": "Unresolved/Unmapped",
-}
-
 TAXONOMY_HINT_MAX_DEPTH = 4
 TAXONOMY_HINT_MIN_FILES = 2
 
@@ -2031,10 +2014,6 @@ def score_record(
     return ranked[:5], confidence, suggested_home, needs_refinement
 
 
-def fallback_home(kind: str) -> str:
-    return AUTOPILOT_FALLBACKS.get(kind, "Unresolved/Unmapped")
-
-
 def resolve_final_home(
     kind: str,
     suggested_home: str | None,
@@ -2046,9 +2025,7 @@ def resolve_final_home(
 
     if suggested_home:
         return suggested_home, "autopilot_high_confidence"
-    if top_candidates:
-        return top_candidates[0]["home"], "autopilot_low_confidence"
-    return fallback_home(kind), "autopilot_fallback"
+    return None, "autopilot_blocked"
 
 
 def sensitivity_flags(record_sources: dict[str, str], metadata: dict[str, Any]) -> list[str]:
@@ -2135,7 +2112,7 @@ def build_manifest_entry(record: FileRecord) -> dict[str, Any]:
     evidence = []
     alternatives = []
     status = record.placement_mode
-    destination = record.final_home or "Unresolved/Unmapped"
+    destination = record.final_home
     if top_candidate:
         rationale = f"Top signal: {top_candidate['home']} ({top_candidate['score']})"
         evidence = top_candidate["evidence"][:6]
@@ -2151,8 +2128,8 @@ def build_manifest_entry(record: FileRecord) -> dict[str, Any]:
     if record.suggested_home is None:
         if record.placement_mode.startswith("autopilot"):
             rationale = (
-                "Low-confidence signal resolved by deterministic placement; alternatives kept for "
-                "automated refinement"
+                "Blocked pending refinement; the manifest keeps evidence and candidate homes, but "
+                "does not assign a routable destination"
             )
         else:
             rationale = (
@@ -2163,6 +2140,7 @@ def build_manifest_entry(record: FileRecord) -> dict[str, Any]:
         "source_path": record.path,
         "proposed_destination": destination,
         "placement_mode": status,
+        "routable": bool(record.final_home and not record.needs_refinement),
         "confidence_score": record.confidence,
         "confidence_band": confidence_band(record.confidence, record.needs_refinement),
         "needs_refinement": bool(record.needs_refinement),
@@ -2376,11 +2354,13 @@ def manifest_output(
     low_confidence = [
         {
             "source_path": rec.path,
-            "proposed_destination": rec.final_home or "Unresolved/Unmapped",
+            "proposed_destination": None,
             "placement_mode": rec.placement_mode,
-            "reason": "Low-confidence signal selected by deterministic tie-breaker"
+            "reason": "Execution blocked until refinement resolves confidence"
             if autopilot
             else "Needs confidence refinement",
+            "candidate_destinations": [candidate["home"] for candidate in rec.top_candidates[:3]],
+            "confidence_score": rec.confidence,
         }
         for rec in records
         if rec.needs_refinement
@@ -2400,6 +2380,7 @@ def manifest_output(
         "file_count": len(records),
         "low_confidence_count": len(low_confidence),
         "needs_refinement": len(low_confidence) > 0,
+        "execution_blocked": len(low_confidence) > 0,
         "execution_mode": "autopilot" if autopilot else "review_mode",
         "manifest_iterations": refinement_iterations,
         "project_terms": term_summary,
@@ -2409,6 +2390,7 @@ def manifest_output(
         "next_actions": {
             "requires_refinement_pass": len(low_confidence) > 0,
             "description": "Re-run semantic scan to tighten low-confidence assignments until low_confidence_count reaches 0 or stabilizes",
+            "execution_ready": len(low_confidence) == 0,
         },
     }
     json.dump(payload, sys.stdout, indent=2, ensure_ascii=False)

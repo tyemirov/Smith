@@ -82,6 +82,7 @@ Native tools like `ffmpeg`, `pdftotext`, `tesseract`, `mdls`, `file`, `strings`,
 Treat the script as an evidence collector. The skill produces the inferred taxonomy without user intervention.
 - `needs_review` is not part of the execution contract. Files are flagged as `low_confidence` and fed through additional automatic refinement passes until `low_confidence` is fully resolved.
 - Any `low_confidence` classification is a hard blocker. No moves are allowed until the manifest reports `low_confidence_count: 0`.
+- Low-confidence manifest entries are non-routable by design: keep their evidence and candidates, but leave `proposed_destination` empty until refinement resolves them.
 
 ## The Banned Words List
 
@@ -289,6 +290,7 @@ scripts/semantic_scan.py . --manifest --autopilot > .tidy-folder-manifest.json
 
 Build the manifest as an iterative artifact:
 - Round 1 must include: source path, proposed destination, evidence source list, and attribution source (`existing_taxonomy`, `filename`, `content`, `metadata`, `ocr`).
+- If an entry is still low-confidence, keep `proposed_destination` empty and surface candidate homes separately; do not emit a fallback destination.
 - Use existing taxonomy as round seeds for scoring; then apply the manifest and regenerate in passes.
 - Continue until `low_confidence` is **zero** and no high-confidence blockers remain.
 
@@ -298,7 +300,7 @@ Hard execution gate:
 
 - For each candidate file/folder group, record:
   - Source path
-  - Proposed destination path
+  - Proposed destination path, or an empty destination when refinement is still required
   - Why this destination is correct (content signal + category rationale)
   - Confidence (High/Medium/Low)
   - Evidence used (filenames, metadata, OCR/text/headers, extension context)
