@@ -13,6 +13,8 @@
         "Client work is separated from personal files",
         "Spreadsheet content can drive Client-Work routing even when the filename is generic",
         "Tagged audio metadata can drive Music routing even when the filename is generic",
+        "Headshots, recipes, and unattributed screenshots land in explicit semantic or explicit fallback homes instead of staying low-confidence",
+        "Autopilot converges to zero low-confidence entries on the fixture",
         "No folder nesting deeper than 3 levels from root"
       ]
     },
@@ -25,6 +27,7 @@
         "Code project internal structure (src/, node_modules/, package.json) is preserved",
         "Misplaced files (random PDFs, screenshots) are moved out of the project tree",
         "Hidden repo markers such as .gitignore influence routing and preserve project atomicity",
+        "Execution preserves project-relative subtrees instead of flattening nested source paths",
         "No modifications to build artifacts or dependency folders"
       ]
     },
@@ -40,7 +43,8 @@
         "Career docs are preserved but not dumped into a vague 'Old' or 'Archive' folder",
         "Spreadsheet rows can drive Investments routing",
         "OCR text from a generic image can drive Identity routing",
-        "Execution remains blocked when only a vague top-level home is available"
+        "Estate-planning, auto, hobby, recipe, and family-memory files reach stable homes",
+        "Opaque leftovers fall into explicit recovery buckets instead of staying low-confidence"
       ]
     }
   ]

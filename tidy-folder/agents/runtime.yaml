@@ -6,6 +6,7 @@ controller:
     - "Own the full tidy-folder pass state, pass counters, and artifact custody (snapshot paths, manifest files, logs, and supervisor handoff history)."
     - "Do not proceed to move execution unless Gatekeeper signs off and the manifest is approved with zero low-confidence."
     - "If execution runs, persist a post-move audit manifest before closing the flow."
+    - "Run the role handoff protocol even when no real subagents are spawned; persisted handoff artifacts are the contract."
 
 steps:
   - id: "tidy-folder-preflight"
@@ -14,7 +15,7 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.3-codex-spark"
     reasoning_effort: "low"
-    scope: "Create/validate rollback snapshot context, parse user target path, and confirm required tooling preconditions. Persist the preflight handoff under .tidy-folder-snapshots/<snapshot_id>/handoffs/."
+    scope: "Create/validate rollback snapshot context, parse user target path, confirm required tooling preconditions, and establish the persistent semantic evidence cache path. Persist the preflight handoff under .tidy-folder-snapshots/<snapshot_id>/handoffs/."
     controller_handoff: "Only continue if target folder exists, snapshot directory policy is clear, and no conflicting move operation is already in-flight."
 
   - id: "tidy-folder-scout"
@@ -23,7 +24,7 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.4-mini"
     reasoning_effort: "medium"
-    scope: "Run semantic_scan manifest/autopilot passes as evidence collectors, persist manifest.json, and produce structured low-confidence lists plus per-file signals. No destination finalization."
+    scope: "Run semantic_scan manifest/autopilot passes as evidence collectors, persist manifest.json, and produce structured low-confidence lists plus per-file signals. This role may run in-process or as a delegated worker, but the artifact contract is the same."
     controller_handoff: "Return manifest file path, low_confidence count, and evidence packets only. If low_confidence is unchanged or high, explicitly request reconciliation pass or escalation."
 
   - id: "tidy-folder-router"
@@ -50,7 +51,7 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.3-codex-spark"
     reasoning_effort: "low"
-    scope: "Execute moves, renames, and deterministic cleanup only under supervisor-approved, gatekeeper-cleared manifest. Emit action deltas and post-move verification stats into the executor handoff."
+    scope: "Execute moves, renames, and deterministic cleanup only under supervisor-approved, gatekeeper-cleared manifest. Preserve project-relative subtrees when the destination is derived from a detected project root. Emit action deltas and post-move verification stats into the executor handoff."
     controller_handoff: "Report skipped/failed moves, touched paths, and manifest delta. Halt if any operation violates target root, snapshot contract, or post-move drift." 
 
   - id: "tidy-folder-audit-and-report"

@@ -436,6 +436,7 @@ class Rule:
     home: str
     patterns: tuple[tuple[str, float], ...]
     kind_bonus: dict[str, float] = field(default_factory=dict)
+    kind_bonus_requires_pattern: bool = True
 
 
 RULES: tuple[Rule, ...] = (
@@ -504,6 +505,19 @@ RULES: tuple[Rule, ...] = (
             ("investment", 3.5),
             ("dividend", 3.0),
             ("balance", 2.0),
+        ),
+    ),
+    Rule(
+        "Finance/Retirement",
+        (
+            ("retirement", 4.0),
+            ("retirement planning", 5.0),
+            ("retirement benefits", 5.0),
+            ("benefits estimate", 4.0),
+            ("social security", 5.0),
+            ("pension", 4.5),
+            ("rollover", 3.5),
+            ("benefit enrollment", 4.0),
         ),
     ),
     Rule(
@@ -641,6 +655,52 @@ RULES: tuple[Rule, ...] = (
         ),
     ),
     Rule(
+        "Family/Memories",
+        (
+            ("birthday", 4.0),
+            ("christmas", 4.0),
+            ("family photo", 5.0),
+            ("grandkids", 5.0),
+            ("grandchildren", 5.0),
+            ("montage", 2.5),
+            ("recital", 4.0),
+            ("xmas", 4.0),
+        ),
+        kind_bonus={"image": 0.8, "video": 0.8},
+    ),
+    Rule(
+        "Legal/Estate-Planning",
+        (
+            ("estate planning", 5.0),
+            ("living trust", 5.0),
+            ("power of attorney", 6.0),
+            ("testament", 6.0),
+            ("will and testament", 6.0),
+            ("will", 4.0),
+        ),
+    ),
+    Rule(
+        "Career/Engineering",
+        (
+            ("career portfolio", 5.0),
+            ("engineering patent", 5.0),
+            ("engineering portfolio", 5.0),
+            ("patent", 5.0),
+            ("resume", 5.0),
+            ("senior engineer", 4.0),
+        ),
+    ),
+    Rule(
+        "Career/Headshots",
+        (
+            ("headshot", 6.0),
+            ("linkedin", 4.0),
+            ("profile photo", 4.5),
+            ("portrait", 3.0),
+        ),
+        kind_bonus={"image": 0.6},
+    ),
+    Rule(
         "Home/Manuals",
         (
             ("manual", 4.0),
@@ -652,6 +712,15 @@ RULES: tuple[Rule, ...] = (
         ),
     ),
     Rule(
+        "Home/Insurance",
+        (
+            ("home insurance", 6.0),
+            ("homeowner policy", 5.0),
+            ("coverage summary", 2.5),
+            ("property renewal", 4.0),
+        ),
+    ),
+    Rule(
         "Home/Hardware",
         (
             ("hardware", 3.0),
@@ -659,6 +728,72 @@ RULES: tuple[Rule, ...] = (
             ("maintenance", 2.5),
             ("inspection", 2.5),
             ("title", 2.0),
+        ),
+    ),
+    Rule(
+        "Home/Garden",
+        (
+            ("garden", 4.0),
+            ("planting", 3.0),
+            ("soil", 2.0),
+            ("vegetable bed", 3.0),
+        ),
+    ),
+    Rule(
+        "Home/Recipes",
+        (
+            ("baking", 3.0),
+            ("cookbook", 5.0),
+            ("ingredients", 3.5),
+            ("recipe", 5.0),
+            ("sourdough", 5.0),
+        ),
+    ),
+    Rule(
+        "Auto/Insurance",
+        (
+            ("auto insurance", 6.0),
+            ("insurance policy", 4.5),
+            ("policy summary", 3.0),
+            ("vehicle insurance", 5.0),
+        ),
+    ),
+    Rule(
+        "Auto/Ownership",
+        (
+            ("car title", 6.0),
+            ("registration", 4.0),
+            ("vehicle title", 6.0),
+            ("vin", 4.0),
+        ),
+    ),
+    Rule(
+        "Hobbies/Woodworking",
+        (
+            ("bookshelf", 4.0),
+            ("cut list", 3.0),
+            ("woodworking", 5.0),
+            ("woodworking plans", 6.0),
+        ),
+    ),
+    Rule(
+        "Reading/Flyers",
+        (
+            ("agenda", 2.5),
+            ("brochure", 4.5),
+            ("conference schedule", 5.0),
+            ("flyer", 4.5),
+            ("vendor flyer", 5.0),
+        ),
+    ),
+    Rule(
+        "Admin/Folder-Setup",
+        (
+            ("declutter", 4.0),
+            ("folder cleanup", 4.0),
+            ("previous sorting attempt", 6.0),
+            ("sorting attempt", 5.0),
+            ("tidy folder", 5.0),
         ),
     ),
     Rule(
@@ -729,11 +864,6 @@ RULES: tuple[Rule, ...] = (
             ("playlists", 3.0),
             ("delete", 3.0),
             ("lolcow", 3.0),
-            ("walkthrough", 2.5),
-            ("screen recording", 4.0),
-            ("recording", 2.0),
-            ("chrome", 1.5),
-            ("webm", 1.5),
         ),
         kind_bonus={"video": 1.0},
     ),
@@ -756,20 +886,17 @@ RULES: tuple[Rule, ...] = (
             ("build", 2.5),
             ("bundle", 2.5),
             ("playground", 2.0),
-            ("prototype", 2.0),
         ),
     ),
     Rule(
-        "Projects",
+        "Screen-Captures",
         (
-            ("screenshot", 3.0),
-            ("screen recording", 4.0),
-            ("demo", 2.5),
-            ("walkthrough", 2.5),
-            ("prototype", 2.5),
-            ("recording", 1.5),
+            ("screen capture", 1.2),
+            ("screen recording", 1.2),
+            ("screencast", 1.2),
+            ("screenshot", 1.0),
         ),
-        kind_bonus={"video": 1.0},
+        kind_bonus={"image": 0.5, "video": 0.5},
     ),
     Rule(
         "Reading/Papers",
@@ -792,6 +919,7 @@ RULES: tuple[Rule, ...] = (
             ("camera", 2.0),
         ),
         kind_bonus={"image": 1.5},
+        kind_bonus_requires_pattern=False,
     ),
 )
 
@@ -844,9 +972,10 @@ class EvidenceBundle:
 @dataclass
 class ScanRuntimeState:
     project_markers: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    evidence_cache: dict[tuple[str, int, int, bool], EvidenceBundle] = field(default_factory=dict)
+    evidence_cache: dict[str, EvidenceBundle] = field(default_factory=dict)
     cache_hits: int = 0
     cache_misses: int = 0
+    cache_dirty: bool = False
 
 
 def run_tool(args: list[str], timeout: int = 30) -> tuple[int, str, str]:
@@ -1311,6 +1440,19 @@ def read_text_preview(path: Path, max_lines: int = 20, max_chars: int = 4000) ->
     lines = text.splitlines()
     preview = "\n".join(lines[:max_lines])
     return preview[:max_chars]
+
+
+def extract_binary_preview(path: Path, brief: str, max_chars: int = 4000) -> str:
+    lower_brief = brief.lower()
+    if "text" in lower_brief or "json" in lower_brief or "xml" in lower_brief:
+        return read_text_preview(path, max_chars=max_chars)
+
+    if tool_exists("strings") and path.stat().st_size <= 5_000_000:
+        code, out, _ = run_tool(["strings", "-n", "6", str(path)], timeout=15)
+        if code == 0 and out.strip():
+            lines = out.splitlines()
+            return "\n".join(lines[:20])[:max_chars]
+    return ""
 
 
 def extract_pdf_preview(path: Path) -> str:
@@ -1868,52 +2010,36 @@ def validate_vision_readiness(paths: list[Path]) -> tuple[bool, dict[str, Any]]:
             },
         )
 
-    if VISION_PROVIDER != "openai" and vision_pipeline() is None:
+    if "video" in media_kinds and not tool_exists("ffmpeg"):
+        return (
+            False,
+            {
+                "enabled": True,
+                "status": "ffmpeg_missing",
+                "reason": "Video vision analysis requires ffmpeg to extract representative frames.",
+            },
+        )
+
+    if VISION_PROVIDER != "openai" and hf_pipeline is None:
         return (
             False,
             {
                 "enabled": True,
                 "status": "pipeline_unavailable",
-                "reason": "Vision pipeline could not be initialized for image/video captioning.",
+                "reason": "Vision dependencies are unavailable for image/video captioning.",
             },
         )
-
-    results: dict[str, dict[str, Any]] = {}
-    for kind in media_kinds:
-        kind_files = [entry for entry in media_files if entry[1] == kind][:3]
-        attempts = 0
-        for media_path, _ in kind_files:
-            attempts += 1
-            if kind == "image":
-                caption = extract_image_vision_caption(media_path, max_chars=200)
-            else:
-                metadata = parse_ffprobe(media_path)
-                caption = extract_video_frame_vision(media_path, metadata)
-            if caption:
-                results[kind] = {"status": "ok", "caption": caption[:80], "sample_path": str(media_path), "attempts": attempts}
-                break
-
-        if kind not in results:
-            results[kind] = {
-                "status": "no_vision_signal",
-                "sample_count": len(kind_files),
-                "sample_paths": [str(path) for path, _ in kind_files],
-            }
-            return (
-                False,
-                {
-                    "enabled": True,
-                    "status": "vision_signal_missing",
-                    "details": results,
-                },
-            )
 
     return (
         True,
         {
             "enabled": True,
             "status": "ready",
-            "details": results,
+            "provider": VISION_PROVIDER,
+            "media_counts": {
+                kind: sum(1 for _, media_kind in media_files if media_kind == kind)
+                for kind in media_kinds
+            },
         },
     )
 
@@ -2147,6 +2273,13 @@ def extract_sources(
                     notes.append("skipped_video_vision_low_signal")
     elif kind == "archive":
         notes.append("archive_unreadable")
+    elif kind == "binary":
+        text = extract_binary_preview(path, brief)
+        if text:
+            sources["text"] = text.lower()
+            notes.append("binary_text_preview")
+        else:
+            notes.append("binary_unreadable")
 
     if metadata:
         metadata_text = " ".join(flatten_text_values(metadata, limit=5000))[:5000]
@@ -2380,7 +2513,7 @@ def score_record(
         (
             str(hint.get("home"))
             for hint in existing_taxonomy_hints or []
-            if hint.get("source") == "project_markers" and hint.get("home") not in {None, "Projects", "Projects/Code"}
+            if hint.get("source") == "project_markers" and hint.get("home") not in {None, "Projects"}
         ),
         None,
     )
@@ -2409,7 +2542,8 @@ def score_record(
                     contribution = source_weight * pattern_weight
                     score += contribution
                     evidence.append(f"{source_name}:{pattern}")
-        if kind in rule.kind_bonus:
+        pattern_score = score
+        if kind in rule.kind_bonus and (pattern_score > 0 or not rule.kind_bonus_requires_pattern):
             contribution = rule.kind_bonus[kind]
             score += contribution
             evidence.append(f"kind:{kind}")
@@ -2462,6 +2596,20 @@ def resolve_final_home(
     return None, "autopilot_blocked"
 
 
+def fallback_home_for_record(
+    kind: str,
+    record_sources: dict[str, str],
+) -> tuple[str, float, str] | None:
+    lower = " ".join(record_sources.values())
+    if kind == "text":
+        return ("Recovery/Unknown-Text", 0.68, "opaque_text_fallback")
+    if kind == "binary":
+        return ("Recovery/Unknown-Binary", 0.72, "opaque_binary_fallback")
+    if kind == "archive" and ("installer" in lower or "setup" in lower):
+        return ("Dev-Tools/Software-Archives", 0.7, "archive_installer_fallback")
+    return None
+
+
 def sensitivity_flags(record_sources: dict[str, str], metadata: dict[str, Any]) -> list[str]:
     text = " ".join(record_sources.values())
     flags: list[str] = []
@@ -2489,11 +2637,19 @@ def build_evidence_bundle(
     runtime_state: ScanRuntimeState,
 ) -> tuple[os.stat_result, EvidenceBundle]:
     stat_result = path.stat()
-    cache_key = (
-        str(path),
-        int(stat_result.st_size),
-        int(stat_result.st_mtime_ns),
-        bool(vision_enabled),
+    vision_signature = "novision"
+    if vision_enabled:
+        provider_model = resolve_vision_model() if VISION_PROVIDER == "openai" else (VISION_PROVIDER_MODEL or "hf")
+        vision_signature = f"vision:{VISION_PROVIDER}:{provider_model}"
+    cache_key = json.dumps(
+        [
+            str(path),
+            int(stat_result.st_size),
+            int(stat_result.st_mtime_ns),
+            vision_signature,
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
     )
     cached = runtime_state.evidence_cache.get(cache_key)
     if cached is not None:
@@ -2520,7 +2676,63 @@ def build_evidence_bundle(
     )
     runtime_state.evidence_cache[cache_key] = bundle
     runtime_state.cache_misses += 1
+    runtime_state.cache_dirty = True
     return stat_result, bundle
+
+
+EVIDENCE_CACHE_SCHEMA_VERSION = 1
+
+
+def load_evidence_cache(path: Path) -> dict[str, EvidenceBundle]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        return {}
+
+    if payload.get("version") != EVIDENCE_CACHE_SCHEMA_VERSION:
+        return {}
+
+    entries = payload.get("entries")
+    if not isinstance(entries, dict):
+        return {}
+
+    loaded: dict[str, EvidenceBundle] = {}
+    for key, item in entries.items():
+        try:
+            loaded[key] = EvidenceBundle(
+                size=int(item["size"]),
+                mtime=str(item["mtime"]),
+                mtime_ns=int(item["mtime_ns"]),
+                sources=dict(item.get("sources", {})),
+                metadata=dict(item.get("metadata", {})),
+                notes=list(item.get("notes", [])),
+                tokens=list(item.get("tokens", [])),
+            )
+        except Exception:
+            continue
+    return loaded
+
+
+def write_evidence_cache(path: Path, runtime_state: ScanRuntimeState) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": EVIDENCE_CACHE_SCHEMA_VERSION,
+        "entries": {
+            key: {
+                "size": bundle.size,
+                "mtime": bundle.mtime,
+                "mtime_ns": bundle.mtime_ns,
+                "sources": bundle.sources,
+                "metadata": bundle.metadata,
+                "notes": bundle.notes,
+                "tokens": bundle.tokens,
+            }
+            for key, bundle in runtime_state.evidence_cache.items()
+        },
+    }
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def tokenize_for_summary(text: str) -> list[str]:
@@ -2832,6 +3044,27 @@ def scan_file(
         flags=flags + bundle.notes,
         tokens=bundle.tokens,
     )
+    if not record.top_candidates:
+        fallback = fallback_home_for_record(kind, bundle.sources)
+        if fallback is not None:
+            home, confidence, flag = fallback
+            record.top_candidates = [
+                {
+                    "home": home,
+                    "score": round(confidence * 10, 2),
+                    "evidence": [f"fallback:{flag}"],
+                }
+            ]
+            record.suggested_home = home
+            record.final_home, record.placement_mode = resolve_final_home(
+                kind,
+                record.suggested_home,
+                record.top_candidates,
+                autopilot=autopilot,
+            )
+            record.confidence = confidence
+            record.needs_refinement = False
+            record.flags = sorted(set(record.flags + [flag]))
     return record, set(bundle.tokens)
 
 
@@ -3134,6 +3367,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Optional provider model name (default: gpt-4o-mini for openai, inferred default for hf).",
     )
+    parser.add_argument(
+        "--cache-file",
+        default="",
+        help="Optional JSON cache file for reusing extracted evidence across controller runs.",
+    )
     return parser
 
 
@@ -3148,7 +3386,10 @@ def main() -> int:
         return 2
 
     paths = list(walk_files(root, include_ignored=args.include_ignored))
+    cache_file = Path(args.cache_file).expanduser().resolve() if args.cache_file else None
     runtime_state = ScanRuntimeState(project_markers=collect_project_markers(root))
+    if cache_file is not None:
+        runtime_state.evidence_cache = load_evidence_cache(cache_file)
 
     if args.vision:
         set_vision_provider(args.vision_provider, args.vision_model)
@@ -3267,6 +3508,9 @@ def main() -> int:
         )
     else:
         pretty_print(records, root, term_summary)
+
+    if cache_file is not None and runtime_state.cache_dirty:
+        write_evidence_cache(cache_file, runtime_state)
     return 0
 
 

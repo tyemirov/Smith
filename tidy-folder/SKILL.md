@@ -55,6 +55,7 @@ Use the `scripts/semantic_scan.py` helper when it is available. Its job is to ga
 - OCR or frame-grab text when local tools are present.
 - Candidate homes with evidence and confidence.
 - The contract is to infer a complete taxonomy end-to-end with no manual routing decisions.
+- The controller-backed workflow reuses a persistent evidence cache under `./.tidy-folder-snapshots/semantic-evidence-cache.json` so repeated manifest/audit passes do not re-extract every unchanged file.
 
 Use `scripts/run_tidy_folder.py` for the full end-to-end workflow when you need the runtime contract, not just the evidence collector. It creates the rollback snapshot, persists the manifest, emits supervisor/router/gatekeeper/executor/audit handoff artifacts, and can optionally execute approved moves once the gates are green.
 
@@ -86,6 +87,7 @@ uv run ./scripts/semantic_scan.py /path/to/folder --manifest --autopilot --visio
 ```
 
 - Vision mode stays opt-in. When you request `--vision --vision-provider hf`, the script bootstraps the extra local `transformers`/`torch` runtime on demand through `uv`; use `--vision-provider openai` to route image/video understanding through an API model instead (requires `OPENAI_API_KEY`).
+- Vision readiness checks stay lightweight: they validate provider/tool prerequisites without forcing a warm-up caption pass before the main scan.
 
 Native tools like `ffmpeg`, `pdftotext`, `tesseract`, `mdls`, `file`, `strings`, and `antiword` are optional accelerators. If a machine does not have them, the scanner still works, but some files will stay low-confidence until enough evidence is available.
 
@@ -93,6 +95,7 @@ Treat the script as an evidence collector. The skill produces the inferred taxon
 - `needs_review` is not part of the execution contract. Files are flagged as `low_confidence` and fed through automatic refinement passes up to a capped limit; if unresolved blockers remain after the capped passes, execution stays blocked and the controller persists the blocker artifacts for the next run.
 - Any `low_confidence` classification is a hard blocker. No moves are allowed until the manifest reports `low_confidence_count: 0`.
 - Low-confidence manifest entries are non-routable by design: keep their evidence and candidates, but leave `proposed_destination` empty until refinement resolves them.
+- Narrow deterministic fallback homes are allowed only after evidence extraction is exhausted: `Screen-Captures` for unattributed screenshots/screencasts, plus `Recovery/Unknown-Text` and `Recovery/Unknown-Binary` for genuinely opaque leftovers.
 
 ## The Banned Words List
 
@@ -155,7 +158,7 @@ Do not ask "should I proceed?" or "should I continue?" at intermediate steps.
 Report the final outcome when the workflow completes or a gate stops it.
 
 This workflow is autopilot-first: no human review cycle is required. Low-confidence placements are emitted in the manifest as actionable refinement candidates and are iterated automatically inside the capped refinement budget before finalization.
-**Hard stop rule:** any non-zero low-confidence count after the capped refinement passes is a hard failure for execution; no file moves occur until `low_confidence_count` reaches zero.
+**Hard stop rule:** any non-zero low-confidence count after the capped refinement passes is a hard failure for execution; no file moves occur until `low_confidence_count` reaches zero. Use the deterministic exception buckets above instead of leaving opaque leftovers unresolved.
 When running `semantic_scan.py --manifest --autopilot`, the script performs an internal refinement loop: it uses high-confidence placements from prior passes as additional taxonomy seeds, then re-runs up to a capped number of passes until low-confidence count stabilizes or reaches zero.
 
 ## Workflow Overview
@@ -329,9 +332,9 @@ Hard execution gate:
 
 If the manifest is written and validated, proceed with move execution only when no blockers remain and `low_confidence_count == 0`.
 
-## Multi-Agent Orchestration Protocol
+## Role-Based Orchestration Protocol
 
-Use this protocol whenever you involve sub-agents in execution. It is mandatory for multi-agent runs.
+Use this protocol whenever you involve sub-agents in execution. When sub-agents are unavailable or unnecessary, the controller must still persist the same role handoff artifacts locally so the workflow stays auditable.
 
 ### Supervisor (Flow Controller)
 
@@ -419,6 +422,7 @@ Execute the reorganization in a single logical pass per category, after the emer
 - **Normalize names**: Use dashes instead of spaces, capitalize meaningfully. "beercss-3.8.0" becomes "BeerCSS-3.8.0"
 - **Flatten unnecessary nesting**: If a path is `Sorted/Archive/Legacy/Archive/Directory_Downloads/Directory_Archive/`, something went wrong. No file should be more than 3 levels deep from the root unless it's a code project with its own internal structure
 - **Preserve project internals**: Code repos, node_modules, build artifacts, and already coherent project trees -- leave their internal structure alone. Only move the top-level project folder or the clearly misfiled leaf, not the meaningful internal hierarchy.
+- If a manifest entry resolves to a project home because of a detected project root, preserve the relative subtree beneath that project root during execution. Do not flatten `src/`, `components/`, or other internal paths into the project root.
 - **Handle duplicates**: If two folders contain the same content (e.g., material-web and material-web-main), keep one canonical project root and remove the duplicate deterministically.
 - **Promote discovered leafs**: If the accumulated understanding revealed a more specific leaf folder during Step 5.5, move files into that leaf rather than leaving them in a broad parent.
 
@@ -451,7 +455,7 @@ If Step 8 reveals a better boundary between parents and leaf folders, feed that 
 Every folder accumulation has genuine junk: saved webpage assets (.js, .css from a "Save Page As"), unidentifiable hash-named files, duplicate compressed versions of the same photo. Handle these:
 - Saved webpage assets (JS, CSS, bundled files): delete as deterministic web artifacts unless a meaningful companion is detected
 - Duplicate photos (file.heic + file.jpeg of same image): keep a deterministic canonical image and route the duplicate to trash
-- Unidentifiable files (UUID names, no extension): try `file` command to identify; if still unclear, route to deterministic holding bucket for later audit.
+- Unidentifiable files (UUID names, no extension): try `file` command to identify; if still unclear, route to `Recovery/Unknown-Text` or `Recovery/Unknown-Binary` for later audit.
 - Project collateral that merely looks like an image/video/audio file is not junk; keep it with the project unless it is clearly a disposable duplicate or explicitly discardable
 - Empty folders: delete silently
 

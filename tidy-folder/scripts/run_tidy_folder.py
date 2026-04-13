@@ -84,6 +84,7 @@ def run_manifest(
     target: Path,
     *,
     uv_binary: str,
+    cache_file: Path | None,
     include_ignored: bool,
     vision: bool,
     vision_provider: str,
@@ -97,6 +98,8 @@ def run_manifest(
         "--manifest",
         "--autopilot",
     ]
+    if cache_file is not None:
+        args.extend(["--cache-file", str(cache_file)])
     if include_ignored:
         args.append("--include-ignored")
     if vision:
@@ -122,6 +125,40 @@ def unique_destination(path: Path) -> Path:
         counter += 1
 
 
+def preserved_relative_suffix(entry: dict[str, Any], source: Path, root: Path) -> Path | None:
+    attribution = entry.get("attribution", {})
+    hints = attribution.get("taxonomy_hints", [])
+    destination = entry.get("proposed_destination")
+    if not isinstance(hints, list) or not destination:
+        return None
+
+    try:
+        relative_source = source.relative_to(root)
+    except ValueError:
+        return None
+
+    for hint in hints:
+        if not isinstance(hint, dict):
+            continue
+        if hint.get("source") != "project_markers":
+            continue
+        if hint.get("home") != destination:
+            continue
+        scope = str(hint.get("scope") or "").strip()
+        if not scope or scope == ".":
+            return None
+        scope_parts = tuple(part for part in Path(scope).parts if part not in {"."})
+        if not scope_parts:
+            return None
+        if relative_source.parts[: len(scope_parts)] != scope_parts:
+            continue
+        suffix_parts = relative_source.parts[len(scope_parts) :]
+        if not suffix_parts:
+            return Path(source.name)
+        return Path(*suffix_parts)
+    return None
+
+
 def approved_actions(manifest: dict[str, Any], root: Path) -> list[dict[str, Any]]:
     actions: list[dict[str, Any]] = []
     for entry in manifest.get("entries", []):
@@ -133,12 +170,14 @@ def approved_actions(manifest: dict[str, Any], root: Path) -> list[dict[str, Any
 
         source = Path(entry["source_path"])
         destination_dir = root / destination
-        destination_path = destination_dir / source.name
+        relative_suffix = preserved_relative_suffix(entry, source, root)
+        destination_path = destination_dir / (relative_suffix or Path(source.name))
         actions.append(
             {
                 "source_path": str(source),
                 "destination_dir": str(destination_dir),
                 "destination_path": str(destination_path),
+                "relative_suffix": str(relative_suffix) if relative_suffix is not None else "",
                 "confidence_score": entry.get("confidence_score"),
                 "rationale": entry.get("rationale"),
             }
@@ -230,6 +269,7 @@ def main() -> int:
     snapshot_dir = target / SNAPSHOT_DIRNAME / snapshot_id
     handoff_dir = snapshot_dir / "handoffs"
     handoff_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = target / SNAPSHOT_DIRNAME / "semantic-evidence-cache.json"
     uv_binary = resolve_uv_binary()
 
     inventory = snapshot_inventory(target, snapshot_dir)
@@ -274,6 +314,7 @@ def main() -> int:
             "uv_available": bool(uv_binary),
             "scanner_available": SCANNER.exists(),
             "snapshot_created": True,
+            "evidence_cache_path": str(cache_file),
         },
     }
     handoff_paths["preflight"] = write_handoff(handoff_dir, "01-preflight.json", preflight)
@@ -327,6 +368,7 @@ def main() -> int:
     manifest = run_manifest(
         target,
         uv_binary=uv_binary,
+        cache_file=cache_file,
         include_ignored=args.include_ignored,
         vision=args.vision,
         vision_provider=args.vision_provider,
@@ -415,6 +457,7 @@ def main() -> int:
         post_move_manifest = run_manifest(
             target,
             uv_binary=uv_binary,
+            cache_file=cache_file,
             include_ignored=args.include_ignored,
             vision=args.vision,
             vision_provider=args.vision_provider,
