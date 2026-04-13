@@ -21,10 +21,9 @@ Usage:
   ./semantic_scan.py /path/to/folder --manifest --autopilot --vision --vision-provider openai
 
 The default output summarizes scores and uncertainty.
-`--manifest --autopilot` emits a deterministic placement manifest intended
-for fully automated execution. Files that score below confidence thresholds are
-marked as low-confidence and routed through an internal refinement pass to reach
-high-confidence destinations.
+`--manifest --autopilot` emits a draft placement manifest for agent review.
+Files that score below confidence thresholds are marked as low-confidence and
+surfaced as blocked draft candidates so an agent can refine or override them.
 """
 
 from __future__ import annotations
@@ -2974,7 +2973,7 @@ def build_manifest_entry(
                 "No strong semantic signal; requires automated refinement for high-confidence placement"
             )
     if entry_gate_failures:
-        rationale = "Blocked by gatekeeper checks before execution."
+        rationale = "Draft candidate blocked by gatekeeper checks pending agent resolution."
 
     return {
         "source_path": record.path,
@@ -3174,14 +3173,20 @@ def json_output(
         else:
             home_counts["Unresolved/Unmapped"] += 1
 
+    helper_blockers_present = bool(low_confidence_count or active_gate_failures)
+    helper_ready_for_agent_review = not helper_blockers_present
     payload = {
         "root": str(root),
         "file_count": len(records),
         "low_confidence_count": low_confidence_count,
         "needs_refinement": low_confidence_count > 0,
         "active_gate_failures": active_gate_failures,
-        "execution_blocked": bool(low_confidence_count or active_gate_failures),
-        "execution_ready": not bool(low_confidence_count or active_gate_failures),
+        "helper_blockers_present": helper_blockers_present,
+        "helper_ready_for_agent_review": helper_ready_for_agent_review,
+        "draft_review_state": "ready_for_agent_review" if helper_ready_for_agent_review else "needs_agent_reconciliation",
+        "requires_agent_review": True,
+        "execution_blocked": helper_blockers_present,
+        "execution_ready": helper_ready_for_agent_review,
         "cache_stats": cache_stats(runtime_state),
         "home_counts": dict(home_counts),
         "kind_counts": dict(kind_counts),
@@ -3224,12 +3229,15 @@ def manifest_output(
     autopilot: bool = False,
     refinement_iterations: list[dict[str, Any]] | None = None,
 ) -> None:
+    helper_blockers_present = bool(
+        [rec for rec in records if rec.needs_refinement] or active_gate_failures
+    )
     low_confidence = [
         {
             "source_path": rec.path,
             "proposed_destination": None,
             "placement_mode": rec.placement_mode,
-            "reason": "Execution blocked until refinement resolves confidence"
+            "reason": "Helper draft withheld until refinement resolves confidence"
             if autopilot
             else "Needs confidence refinement",
             "candidate_destinations": [candidate["home"] for candidate in rec.top_candidates[:3]],
@@ -3248,27 +3256,40 @@ def manifest_output(
             }
         ]
 
+    entries = [
+        build_manifest_entry(rec, entry_gate_failures=entry_gate_failures.get(rec.path, []))
+        for rec in records
+    ]
+    helper_ready_for_agent_review = not helper_blockers_present
+    draft_review_state = (
+        "ready_for_agent_review" if helper_ready_for_agent_review else "needs_agent_reconciliation"
+    )
+
     payload = {
         "root": str(root),
         "file_count": len(records),
         "low_confidence_count": len(low_confidence),
         "needs_refinement": len(low_confidence) > 0,
         "active_gate_failures": active_gate_failures,
-        "execution_blocked": bool(len(low_confidence) > 0 or active_gate_failures),
+        "helper_blockers_present": helper_blockers_present,
+        "helper_ready_for_agent_review": helper_ready_for_agent_review,
+        "draft_review_state": draft_review_state,
+        "requires_agent_review": True,
+        "execution_blocked": helper_blockers_present,
         "execution_mode": "autopilot" if autopilot else "review_mode",
         "manifest_iterations": refinement_iterations,
         "cache_stats": cache_stats(runtime_state),
         "project_terms": term_summary,
         "taxonomy_hints": summarize_taxonomy_seeds(taxonomy_hints),
-        "entries": [
-            build_manifest_entry(rec, entry_gate_failures=entry_gate_failures.get(rec.path, []))
-            for rec in records
-        ],
+        "entries": entries,
         "low_confidence": low_confidence,
         "next_actions": {
-            "requires_refinement_pass": bool(len(low_confidence) > 0 or active_gate_failures),
-            "description": "Re-run semantic scan/controller reconciliation until low_confidence_count reaches 0 and active_gate_failures is empty",
-            "execution_ready": not bool(len(low_confidence) > 0 or active_gate_failures),
+            "requires_refinement_pass": helper_blockers_present,
+            "requires_agent_reconciliation": helper_blockers_present,
+            "description": "Review helper evidence and draft candidates, reconcile blockers, then decide whether to execute",
+            "agent_review_required": True,
+            "helper_ready_for_agent_review": helper_ready_for_agent_review,
+            "execution_ready": helper_ready_for_agent_review,
         },
     }
     json.dump(payload, sys.stdout, indent=2, ensure_ascii=False)
@@ -3339,12 +3360,12 @@ def build_parser() -> argparse.ArgumentParser:
     output_group.add_argument(
         "--manifest",
         action="store_true",
-        help="Emit a placement manifest for execution",
+        help="Emit a draft placement manifest for agent review",
     )
     parser.add_argument(
         "--autopilot",
         action="store_true",
-        help="In manifest/json mode, assign every item a deterministic destination path and expose low-confidence entries for refinement",
+        help="In manifest/json mode, infer draft destinations where possible and expose low-confidence entries for refinement; outputs remain advisory",
     )
     parser.add_argument(
         "--include-ignored",

@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -59,6 +60,7 @@ def run_controller(files: dict[str, str], *, execute: bool = False) -> dict:
         report = json.loads(proc.stdout)
         assert Path(report["snapshot_path"]).exists()
         assert Path(report["manifest_path"]).exists()
+        assert Path(report["draft_actions_path"]).exists()
         assert Path(report["approved_actions_path"]).exists()
         for handoff_path in report["handoff_paths"].values():
             assert Path(handoff_path).exists()
@@ -96,6 +98,9 @@ def evidence_contains(entry: dict, prefix: str, token: str) -> bool:
 def assert_manifest_ready(payload: dict) -> None:
     assert payload["low_confidence_count"] == 0
     assert payload["active_gate_failures"] == []
+    assert payload["helper_ready_for_agent_review"] is True
+    assert payload["draft_review_state"] == "ready_for_agent_review"
+    assert payload["requires_agent_review"] is True
     assert payload["execution_blocked"] is False
     assert payload["next_actions"]["execution_ready"] is True
 
@@ -204,6 +209,8 @@ def main() -> int:
         {"demo-notes.txt": "prototype walkthrough for demo recording\n"}
     )
     assert controller_report["execution_ready"] is True
+    assert controller_report["helper_ready_for_agent_review"] is True
+    assert controller_report["requires_agent_review"] is True
     assert controller_report["active_gate_failures"] == []
     assert set(controller_report["handoff_paths"]) == {
         "supervisor",
@@ -223,6 +230,7 @@ def main() -> int:
         execute=True,
     )
     assert controller_execute_report["execution_ready"] is True
+    assert controller_execute_report["helper_execution_status"] == "executed"
     assert controller_execute_report["post_move_summary"]["low_confidence_count"] == 0
     assert controller_execute_report["post_move_summary"]["active_gate_failures"] == []
     assert "./inbox" in controller_execute_report["empty_dirs_removed"]
@@ -250,6 +258,71 @@ def main() -> int:
         )
         assert first["cache_stats"]["misses"] > 0
         assert second["cache_stats"]["hits"] > 0
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / "demo-notes.txt").write_text("prototype walkthrough for demo recording\n", encoding="utf-8")
+        lock_dir = root / ".tidy-folder-snapshots"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = lock_dir / "active-run.lock.json"
+        fresh_lock = {
+            "run_id": "existing-run",
+            "target_folder": str(root),
+            "snapshot_path": str(lock_dir / "existing-run"),
+            "owner": "other@host:999",
+            "phase": "router",
+            "started_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "pid": 999,
+        }
+        lock_path.write_text(json.dumps(fresh_lock, indent=2) + "\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(CONTROLLER), str(root)],
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 2
+        report = json.loads(proc.stdout)
+        assert report["draft_review_state"] == "blocked_by_run_lock"
+        assert report["helper_ready_for_agent_review"] is False
+        assert report["run_lock_released"] is False
+        assert Path(report["draft_actions_path"]).exists()
+        assert any(
+            failure["code"] == "preflight_conflicting_run_lock"
+            for failure in report["active_gate_failures"]
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / "demo-notes.txt").write_text("prototype walkthrough for demo recording\n", encoding="utf-8")
+        lock_dir = root / ".tidy-folder-snapshots"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = lock_dir / "active-run.lock.json"
+        stale_lock = {
+            "run_id": "stale-run",
+            "target_folder": str(root),
+            "snapshot_path": str(lock_dir / "stale-run"),
+            "owner": "other@host:998",
+            "phase": "scout",
+            "started_at": "2000-01-01T00:00:00Z",
+            "updated_at": "2000-01-01T00:00:00Z",
+            "pid": 998,
+        }
+        lock_path.write_text(json.dumps(stale_lock, indent=2) + "\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(CONTROLLER), str(root), "--lease-seconds", "1"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        report = json.loads(proc.stdout)
+        assert report["lock_takeover_artifact"]
+        takeover_artifact = Path(report["lock_takeover_artifact"])
+        assert takeover_artifact.exists()
+        takeover = json.loads(takeover_artifact.read_text(encoding="utf-8"))
+        assert takeover["code"] == "stale_run_lock_takeover"
+        assert report["run_lock_released"] is True
+        assert not Path(report["run_lock_path"]).exists()
 
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)

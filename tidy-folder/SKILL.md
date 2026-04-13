@@ -43,6 +43,55 @@ If any clue points to a named project, client, product, brand, campaign, or even
 
 When existing taxonomy exists, do not treat it as decoration: it must become a scoring input.
 
+### Evidence Precedence
+
+When signals conflict, resolve them in this order:
+
+1. **Structural safety and atomicity first**
+   - Preserve coherent project roots and already-semantic subtrees unless direct file-level evidence isolates a misfiled leaf.
+   - Never split a detected project root because of file extension, medium, or a weak one-off clue.
+
+2. **Direct file evidence second**
+   - Embedded text, visible content, OCR, metadata, tags, titles, and repeated cross-file signals outrank filenames and folder labels.
+   - If the contents clearly say what the file is, trust the contents over the name.
+
+3. **Existing taxonomy third**
+   - If a file already sits inside a coherent existing home, keep that prior unless direct evidence clearly contradicts it.
+   - Existing taxonomy is a strong prior, not an untouchable rule.
+
+4. **User lookup behavior fourth**
+   - If multiple homes remain semantically valid, choose the one where the user would look first.
+   - This is the tie-breaker for cross-domain files like leases, enrollment forms, and project collateral.
+
+5. **Path and filename priors fifth**
+   - Nearby folders, basenames, repeated tokens, and sibling patterns matter when direct evidence is weak or absent.
+   - Treat them as supporting context, not primary truth.
+
+6. **Medium and extension last**
+   - `Photos`, `Videos`, `Audio`, and extension-like buckets are only valid when no stronger semantic home exists.
+   - A medium bucket never outranks project attribution or clear domain evidence.
+
+7. **Helper output last**
+   - Helper scores, draft homes, and helper confidence are advisory summaries of evidence.
+   - If they conflict with the rules above, agents must override them and record why.
+
+## Decision Authority
+
+This skill is **agent-led**.
+
+- Helper scripts gather evidence, persist artifacts, and may propose candidate homes.
+- Helper scripts do **not** decide final taxonomy.
+- Helper scripts do **not** clear ambiguity.
+- Helper scripts do **not** approve execution.
+- The AI role graph does that work:
+  - `Scout` gathers evidence.
+  - `Router` makes placement decisions.
+  - `Gatekeeper` challenges and approves or blocks those decisions.
+  - `Supervisor` owns the run state and decides whether execution is safe.
+  - `Executor` performs only agent-approved moves.
+
+If helper output conflicts with stronger file-level evidence, existing taxonomy, or cross-file context, the agents must override the helper output and record why.
+
 ## Recommended Tooling
 
 Use the `scripts/semantic_scan.py` helper when it is available. Its job is to gather evidence, not to make final decisions:
@@ -54,10 +103,10 @@ Use the `scripts/semantic_scan.py` helper when it is available. Its job is to ga
 - Metadata from images and media files.
 - OCR or frame-grab text when local tools are present.
 - Candidate homes with evidence and confidence.
-- The contract is to infer a complete taxonomy end-to-end with no manual routing decisions.
+- The helper contract is to surface evidence packets and draft candidate homes that agents review. Its outputs are advisory, not authoritative.
 - The controller-backed workflow reuses a persistent evidence cache under `./.tidy-folder-snapshots/semantic-evidence-cache.json` so repeated manifest/audit passes do not re-extract every unchanged file.
 
-Use `scripts/run_tidy_folder.py` for the full end-to-end workflow when you need the runtime contract, not just the evidence collector. It creates the rollback snapshot, persists the manifest, emits supervisor/router/gatekeeper/executor/audit handoff artifacts, and can optionally execute approved moves once the gates are green.
+Use `scripts/run_tidy_folder.py` when you want helper-generated artifacts around the agent workflow, not as the source of authority. It creates the rollback snapshot, persists draft manifests and handoff artifacts, and can stage execution artifacts for the agent graph to review.
 
 ### Dependency and execution model
 
@@ -88,14 +137,15 @@ uv run ./scripts/semantic_scan.py /path/to/folder --manifest --autopilot --visio
 
 - Vision mode stays opt-in. When you request `--vision --vision-provider hf`, the script bootstraps the extra local `transformers`/`torch` runtime on demand through `uv`; use `--vision-provider openai` to route image/video understanding through an API model instead (requires `OPENAI_API_KEY`).
 - Vision readiness checks stay lightweight: they validate provider/tool prerequisites without forcing a warm-up caption pass before the main scan.
+- Helpers are optional accelerators. If a helper cannot answer a question cleanly, continue with shell inspection and agent reasoning rather than pretending the helper made a decision.
 
 Native tools like `ffmpeg`, `pdftotext`, `tesseract`, `mdls`, `file`, `strings`, and `antiword` are optional accelerators. If a machine does not have them, the scanner still works, but some files will stay low-confidence until enough evidence is available.
 
-Treat the script as an evidence collector. The skill produces the inferred taxonomy without user intervention.
-- `needs_review` is not part of the execution contract. Files are flagged as `low_confidence` and fed through automatic refinement passes up to a capped limit; if unresolved blockers remain after the capped passes, execution stays blocked and the controller persists the blocker artifacts for the next run.
-- Any `low_confidence` classification is a hard blocker. No moves are allowed until the manifest reports `low_confidence_count: 0`.
-- Low-confidence manifest entries are non-routable by design: keep their evidence and candidates, but leave `proposed_destination` empty until refinement resolves them.
-- Narrow deterministic fallback homes are allowed only after evidence extraction is exhausted: `Screen-Captures` for unattributed screenshots/screencasts, plus `Recovery/Unknown-Text` and `Recovery/Unknown-Binary` for genuinely opaque leftovers.
+Treat the script as an evidence collector and artifact writer. The skill's AI agents produce the inferred taxonomy without user intervention.
+- `needs_review` is not part of the human workflow contract. Helper-reported `low_confidence` is an escalation signal for `Router` and `Gatekeeper`, not independent authority.
+- Helper-generated `proposed_destination` values are drafts. Agents may keep, refine, or reject them.
+- Low-confidence draft entries are non-routable by default: keep their evidence and candidates explicit until agent review resolves them.
+- Narrow deterministic fallback homes are allowed only after evidence extraction is exhausted and the agents explicitly approve them: `Screen-Captures` for unattributed screenshots/screencasts, plus `Recovery/Unknown-Text` and `Recovery/Unknown-Binary` for genuinely opaque leftovers.
 
 ## The Banned Words List
 
@@ -123,7 +173,8 @@ The only exception: a subfolder inside a well-named parent (e.g., `3D-Printing/A
 Before you begin **any move**, enforce this gate. If any item fails, reroute taxonomy design automatically and refine before continuing.
 
 1. **Semantic fidelity check**
-   - If a folder name is vague (`Projects`, `Media`, `Personal`, `References`, etc.), replace with a specific, discoverable home.
+   - If a folder name is vague (`Media`, `Personal`, `References`, etc.), replace with a specific, discoverable home.
+   - `Projects` is only acceptable when the source actually contains distinct project roots or a deliberate project parent with project-specific children.
    - For every proposed top-level folder, keep at least three expected file examples and at least one concrete use case in the rationale. If confidence is weak, keep the folder out of top-level taxonomy and continue narrowing evidence.
 
 2. **Project atomicity check**
@@ -148,7 +199,8 @@ Before you begin **any move**, enforce this gate. If any item fails, reroute tax
    - For files that could belong to multiple categories, keep it where the user would look first (housing doc first in Home, school item first in Kids/School, project collateral first in its project).
 
 7. **Gate outcome**
-   - If any check is uncertain, resolve it with a deterministic refinement pass and rerun Step 5.5 until the gate passes and `low_confidence_count` is zero.
+   - If any check is uncertain, route it back through `Scout`/`Router`/`Gatekeeper` refinement and rerun Step 5.5 until the gate passes.
+   - A helper reporting `low_confidence_count == 0` is useful evidence, but not sufficient by itself. Gatekeeper approval is the execution gate.
 
 ## Autonomy
 
@@ -157,9 +209,9 @@ The validation gates defined in this workflow are the only stopping points.
 Do not ask "should I proceed?" or "should I continue?" at intermediate steps.
 Report the final outcome when the workflow completes or a gate stops it.
 
-This workflow is autopilot-first: no human review cycle is required. Low-confidence placements are emitted in the manifest as actionable refinement candidates and are iterated automatically inside the capped refinement budget before finalization.
-**Hard stop rule:** any non-zero low-confidence count after the capped refinement passes is a hard failure for execution; no file moves occur until `low_confidence_count` reaches zero. Use the deterministic exception buckets above instead of leaving opaque leftovers unresolved.
-When running `semantic_scan.py --manifest --autopilot`, the script performs an internal refinement loop: it uses high-confidence placements from prior passes as additional taxonomy seeds, then re-runs up to a capped number of passes until low-confidence count stabilizes or reaches zero.
+This workflow is autopilot-first at the human level: no human review cycle is required by default.
+Internal agent review is still required: `Scout`, `Router`, `Gatekeeper`, and `Supervisor` must adjudicate ambiguity before execution.
+When running `semantic_scan.py --manifest --autopilot`, the script may perform internal refinement loops and draft candidate homes, but helper convergence does not authorize moves by itself.
 
 ## Workflow Overview
 
@@ -173,12 +225,24 @@ Before touching a single file, build a complete picture of what exists and who t
 
 Capture a timestamped pre-run snapshot before any scans or moves. This snapshot is mandatory and serves as the rollback baseline if the reorganization needs to be reversed.
 
+The default snapshot must stay lightweight and fast:
+
+- Always capture structure, file inventory, and metadata manifests.
+- Always create a run lock and update it through the workflow.
+- Do **not** create a full mirror copy of the target tree during a normal run.
+- Use reversible move ledgers and snapshot trash for non-interactive cleanup instead of paying the cost of a full-copy mirror up front.
+
 ```bash
 cd <target-folder>
 mkdir -p .tidy-folder-snapshots
 snap="$(date +%Y%m%d_%H%M%S)"
 SNAP_DIR=".tidy-folder-snapshots/$snap"
 mkdir "$SNAP_DIR"
+LOCK_FILE=".tidy-folder-snapshots/active-run.lock.json"
+
+cat > "$LOCK_FILE" <<EOF
+{"run_id":"$snap","started_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","updated_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","phase":"preflight","target_folder":"$(pwd)"}
+EOF
 
 # Structure and file inventory (human-readable)
 find . \
@@ -193,20 +257,25 @@ find . \
   \( -path './.git' -o -path './.tidy-folder-snapshots' \) -prune \
   -o -type f -exec sh -c 'stat -f "%N|%z|%m|%a" "$1"' _ {} \; | sort > "$SNAP_DIR/file-metadata.tsv"
 
-# Optional deterministic rollback payload (full content copy). Keep this if you want to
-# revert changes by restoring files, not just auditing deltas.
-mkdir -p "$SNAP_DIR/full-copy"
-rsync -a --delete \
-  --exclude='.git' \
-  --exclude='.tidy-folder-snapshots' \
-  . "$SNAP_DIR/full-copy"/
-
 cp "$SNAP_DIR/files.txt" "$SNAP_DIR/.tidy-folder-pre-run-files.txt"
 cp "$SNAP_DIR/file-metadata.tsv" "$SNAP_DIR/.tidy-folder-pre-run-metadata.tsv"
+mkdir -p "$SNAP_DIR/trash"
 ```
 
-If this file set is present, a rollback candidate exists. Before finishing a session, keep it with the folder as `./.tidy-folder-snapshots/` and do not delete it until the user confirms completion.
-If rollback is required later, only the `full-copy` snapshot supports guaranteed restoration.
+If this file set is present, a rollback candidate exists. Before finishing a session, keep it with the folder as `./.tidy-folder-snapshots/` and do not delete it automatically at the end of the run.
+Rollback should use the pre-run inventory plus the move/deletion ledger from the run. Non-interactive cleanup must remain reversible by routing removals into the snapshot trash rather than permanent erase during the active run.
+
+### Run Lock and Lease
+
+The no-overlap rule must be operational, not aspirational:
+
+- `Supervisor` must create `./.tidy-folder-snapshots/active-run.lock.json` before scanning.
+- The lock must include at least: `run_id`, `target_folder`, `phase`, `started_at`, `updated_at`, and `owner`.
+- Update `updated_at` at every phase transition and during long scans or move batches.
+- If a lock exists and was updated recently, abort the new run immediately.
+- If a lock is stale beyond the local lease threshold, write a takeover record into the new snapshot, replace the lock, and continue non-interactively.
+- `Executor` must refuse to move files if the active lock no longer matches the current `run_id`.
+- On success, block, or abort, write the final status artifact and remove the active lock.
 
 **Step 1: Scan the folder structure**
 
@@ -264,9 +333,9 @@ Remember that an existing folder tree is often already semantically coherent eve
 
 **Step 5: Propose the taxonomy**
 
-Design 8-15 top-level categories based on life domains. Within each category, prefer the most specific stable subfolder that the inventory supports. Do not default to generic child folders like `Images`, `Media`, `Stuff`, or `Misc`; choose role-based or project-based names that tell the user what is inside. If the inventory reveals a repeated project or product name, create a project-specific home before falling back to a broader bucket.
+Design only as many top-level categories as the inventory clearly supports. Small folders may need only 1-5 top-level homes; larger mixed archives may need more. Do not force a target count. Within each category, prefer the most specific stable subfolder that the inventory supports. Do not default to generic child folders like `Images`, `Media`, `Stuff`, or `Misc`; choose role-based or project-based names that tell the user what is inside. If the inventory reveals a repeated project or product name, create a project-specific home before falling back to a broader bucket.
 
-Publish the taxonomy proposal internally with a brief description of what goes in each. Common domains (adapt to the specific user):
+Publish the taxonomy proposal internally with a brief description of what goes in each. Possible domains when the evidence supports them:
 
 - **Kids** -- school records, health records, educational materials, activities
 - **Family** -- trips, housing/leases, shared family documents, legal records
@@ -275,13 +344,13 @@ Publish the taxonomy proposal internally with a brief description of what goes i
 - **Business** -- startup materials, pitch decks, branding, pricing research
 - **Health** -- medical records, lab results, nutrition research, prescriptions
 - **Home** -- product manuals, hardware photos, appliance docs, home improvement
-- **Projects** -- code repos, technical projects, data projects
+- **Projects** -- only when the source actually contains real project roots or repeated project-specific materials
 - **3D-Printing** -- models, slicing files, reference shapes (if applicable)
-- **Photos** -- memory photos and event snapshots organized by event/subject, not date; not project collateral
+- **Photos** -- only for genuine memory photos and event snapshots; not project collateral
 - **Reading** -- books, academic papers, research (actual intellectual reading)
 - **Dev-Tools** -- downloaded libraries, frameworks, browser tools, SDKs
 
-These are examples. The actual categories should emerge from the inventory, not from a template. A musician might need "Music". A photographer might need "Client-Work". A student might need "Courses".
+These are examples. The actual categories should emerge from the inventory, not from a template. `Projects` is a valid option only if projects are actually present in the source. A musician might need `Music`. A photographer might need `Client-Work`. A student might need `Courses`.
 
 If a group of files shows coherent shared structure (e.g., repeated CSV schema columns, shared report titles, recurring partner names, common tags) and no existing top-level node matches, the taxonomy should grow upward: add a new higher-level node for that inferred domain, then place files under it (or under a project leaf beneath it).
 
@@ -294,24 +363,26 @@ Example:
 
 If pre-existing folders already encode a structure, treat those as starting taxonomy anchors, then run the manifest loop against that prior structure before creating new roots.
 
-Before moves begin, create a placement manifest as a single source of truth:
+Before moves begin, create a draft placement manifest as the shared working artifact:
 
 ```bash
 cd /Users/tyemirov/Development/agentSkills/tidy-folder
 python3 ./scripts/run_tidy_folder.py <target-folder>
 ```
 
-The controller writes its manifest and handoff records into `./.tidy-folder-snapshots/<snapshot_id>/` inside the target folder, including `manifest.json`, `approved-actions.json`, `handoffs/00-supervisor.json`, and the per-phase handoff files for preflight, scout, router, gatekeeper, executor, and audit. When execution runs, it also writes a post-move audit manifest.
+The controller writes its draft manifest and handoff records into `./.tidy-folder-snapshots/<snapshot_id>/` inside the target folder, including `manifest.json`, `approved-actions.json`, `handoffs/00-supervisor.json`, and the per-phase handoff files for preflight, scout, router, gatekeeper, executor, and audit. When execution runs, it also writes a post-move audit manifest. These artifacts support the agent handoff protocol; they are not authoritative until the agents ratify them.
 
 Build the manifest as an iterative artifact:
-- Round 1 must include: source path, proposed destination, evidence source list, and attribution source (`existing_taxonomy`, `filename`, `content`, `metadata`, `ocr`).
-- If an entry is still low-confidence, keep `proposed_destination` empty and surface candidate homes separately; do not emit a fallback destination.
-- Use existing taxonomy as round seeds for scoring; then apply the manifest and regenerate in passes.
-- Continue automatic refinement through the capped pass budget; if `low_confidence` is still non-zero or any gate blockers remain, execution must stay blocked and the unresolved entries must remain explicit in the manifest.
+- Round 1 may be helper-produced and must include: source path, proposed destination or candidate homes, evidence source list, and attribution source (`existing_taxonomy`, `filename`, `content`, `metadata`, `ocr`).
+- `Router` must convert helper evidence into agent-authored manifest decisions with explicit rationale.
+- If an entry is still low-confidence after agent review, keep `proposed_destination` empty or keep it explicitly blocked; do not auto-pretend the helper resolved it.
+- Use existing taxonomy as round seeds for scoring; then let agents reconcile helper proposals in passes.
+- Continue automatic refinement through the capped pass budget as needed, but execution stays blocked until `Gatekeeper` signs off on the agent-reviewed manifest.
 
 Hard execution gate:
-- Re-run the manifest pass after each reconciliation while you are still within the capped refinement budget and `low_confidence_count > 0`.
-- Execute moves only when the manifest resolves to `low_confidence_count == 0`.
+- Re-run helper evidence passes after each reconciliation when they add value.
+- Execute moves only when `Gatekeeper` approves the agent-reviewed manifest and `Supervisor` authorizes execution.
+- Helper `low_confidence_count == 0` is helpful, but not sufficient by itself.
 
 - For each candidate file/folder group, record:
   - Source path
@@ -330,47 +401,57 @@ Hard execution gate:
   - Any `low_confidence` destination
 - If there are blockers, iterate Step 5.5 automatically and repair the taxonomy before continuing.
 
-If the manifest is written and validated, proceed with move execution only when no blockers remain and `low_confidence_count == 0`.
+If the manifest is written and validated, proceed with move execution only when no blockers remain and `Gatekeeper` plus `Supervisor` have signed off on the agent-reviewed version.
 
 ## Role-Based Orchestration Protocol
 
-Use this protocol whenever you involve sub-agents in execution. When sub-agents are unavailable or unnecessary, the controller must still persist the same role handoff artifacts locally so the workflow stays auditable.
+Use this protocol whenever you involve sub-agents in execution. This protocol is the control plane. When sub-agents are unavailable or unnecessary, the controller must still persist the same role handoff artifacts locally so the workflow stays auditable.
 
 ### Supervisor (Flow Controller)
 
 - Owns pass count, manifests, refinement iterations, and snapshot policy.
 - Creates and tracks `supervisor_handoff` records before each phase transition.
 - Never allows move actions without a green gate from Gatekeeper.
+- Treats helper manifests, confidence scores, and fallback suggestions as advisory only.
 
 ### Scout Agent
 
 - Scans assigned path slices for evidence only.
 - Returns structured evidence packets (path context, text signals, metadata, OCR/vision hints, existing-taxonomy anchors).
+- May call helpers to accelerate extraction, but does not convert helper output into final placement decisions.
 - Does not create final destination decisions.
 
 ### Router Agent
 
-- Converts scout evidence into manifest entries.
+- Converts scout evidence into agent-authored manifest entries.
 - Builds proposals with:
   - deterministic destination,
   - tie-break rationale,
   - top candidates and alternatives,
   - confidence band.
 - Applies specificity ladder and existing taxonomy anchors before proposing generic media/doc buckets.
+- May accept, refine, or override helper candidate homes, but must explain overrides and unresolved ambiguity.
 
 ### Gatekeeper Agent
 
 - Blocks execution on any of:
-  - `low_confidence_count != 0`,
+  - helper-reported low confidence that remains unresolved after agent review,
   - placement modes that are not high-confidence,
-  - `needs_refinement` entries,
+  - unresolved `needs_refinement` entries,
   - taxonomy gate failures (vague top-level intent, duplicate semantics, redundant nesting, project split violations, shallow depth violations, cross-domain tie-break errors).
+- Must inspect raw `Scout` evidence independently, not just `Router` rationale.
+- Must independently review:
+  - every deletion candidate,
+  - every sensitive bucket (`Health`, `Finance`, `Legal`, `Identity`, kids records),
+  - and a representative sample from each major proposed home, including at least one weak-signal example.
+- Treats helper-reported low confidence and helper gate failures as strong signals, but confirms or overrides them explicitly.
 - Returns explicit fix packets and a re-run trigger; does not allow ambiguous moves.
 
 ### Executor Agent
 
 - Applies only Supervisor-approved, Gatekeeper-cleared manifest actions.
 - Performs idempotent, deterministic mv operations and canonical cleanup.
+- Never treats helper `approved-actions.json` as authority on its own.
 - Reports action deltas and any drift before handoff returns to Supervisor.
 
 Handoff requirements:
@@ -378,8 +459,10 @@ Handoff requirements:
 - `snapshot_id`
 - `manifest_path`
 - `pass`
-- `low_confidence_count` (must be 0)
-- `active_gate_failures` (must be empty)
+- `scout_evidence_paths`
+- `helper_findings`
+- `decision_rationale`
+- `active_gate_failures` (must be empty at execution time)
 - `approved_actions`
 
 Parallelism rule:
@@ -398,7 +481,7 @@ This is an iterative cycle. Treat the taxonomy as a working hypothesis, then let
 - Reassign files from a broad parent into a new leaf when accumulated understanding makes that leaf the more specific and more searchable home.
 - Prefer repeated evidence or strong cross-file context over a one-off guess before creating a new leaf.
 - Re-run the audit against the new leafs so the earlier provisional placements can be corrected before anything is finalized.
-- Continue Step 5.5 cycles until the manifest reaches `low_confidence_count == 0`.
+- Continue Step 5.5 cycles until `Gatekeeper` signs off that every entry is resolved or explicitly adjudicated.
 - Keep each iteration recorded in the manifest as an explicit pass with the exact rationale for each file-level move so the cycle is auditable and deterministic.
 
 Examples of healthy refinement:
@@ -412,9 +495,9 @@ If later auditing reveals that a broad category should actually be split differe
 
 **Step 6: Move and rename**
 
-Use the validated placement manifest from Step 5 as the execution source of truth.
+Use the validated, agent-approved placement manifest from Step 5 as the execution plan.
 
-This step runs only when Step 5/5.5 has completed a fully validated manifest with `low_confidence_count == 0` and no active gate blockers.
+This step runs only when Step 5/5.5 has completed a fully validated, agent-reviewed manifest with no unresolved blockers.
 
 Execute the reorganization in a single logical pass per category, after the emerging taxonomy has been reviewed and refined. Key principles:
 
@@ -431,6 +514,20 @@ Use `mv` not `cp` to avoid doubling disk usage. If a move fails or times out on 
 ### Phase 3: Deep Content Audit
 
 This is what makes the reorganization actually good rather than just superficially tidy. After the initial categorization, go back through each category and verify that every file is where the user would look for it.
+
+Audit groups, not every file individually, unless the group is mixed-signal or high-risk:
+
+- Cluster by proposed home, repeated tokens, source subtree, and file role.
+- For a stable cluster, inspect representative members:
+  - the strongest-signal file,
+  - the weakest-signal file,
+  - and at least one additional sample when the cluster is large.
+- Escalate to full-file review only for:
+  - sensitive domains,
+  - deletion candidates,
+  - mixed-signal clusters,
+  - or clusters where representative review finds drift.
+- Once a cluster is stable, accept the cluster and move on instead of rereading every member.
 
 **Step 7: Audit each category**
 
@@ -453,13 +550,16 @@ If Step 8 reveals a better boundary between parents and leaf folders, feed that 
 **Step 9: Identify and handle junk**
 
 Every folder accumulation has genuine junk: saved webpage assets (.js, .css from a "Save Page As"), unidentifiable hash-named files, duplicate compressed versions of the same photo. Handle these:
-- Saved webpage assets (JS, CSS, bundled files): delete as deterministic web artifacts unless a meaningful companion is detected
-- Duplicate photos (file.heic + file.jpeg of same image): keep a deterministic canonical image and route the duplicate to trash
+- Saved webpage assets (JS, CSS, bundled files): treat as deletable only when a matching saved-page companion exists and the asset folder contains only derivative web-export files. If independent content signals exist, keep them.
+- Exact duplicates: remove only when they are byte-identical or otherwise provably identical by deterministic evidence.
+- Duplicate photos (file.heic + file.jpeg of same image): auto-remove only when the files are clearly the same capture and one is a lower-fidelity derivative. If the equivalence is not deterministic, keep both or route them to a reversible duplicate-review area.
 - Unidentifiable files (UUID names, no extension): try `file` command to identify; if still unclear, route to `Recovery/Unknown-Text` or `Recovery/Unknown-Binary` for later audit.
 - Project collateral that merely looks like an image/video/audio file is not junk; keep it with the project unless it is clearly a disposable duplicate or explicitly discardable
 - Empty folders: delete silently
 
-Apply deterministic deletion rules only: generated web assets, exact duplicates, and empty folders. Never pause for confirmation.
+Apply deterministic deletion rules only: generated web assets with matching companions, exact duplicates, and empty folders. Never pause for confirmation.
+Non-interactive cleanup must still be reversible during the run: move removed items into `./.tidy-folder-snapshots/<snapshot_id>/trash/` with a deletion ledger instead of permanently erasing them during the active workflow.
+Scripts may surface deletion candidates, but deletion decisions still belong to `Router`/`Gatekeeper`/`Executor`.
 
 **Step 10: Present the final structure**
 
@@ -473,11 +573,8 @@ This is required only if the reorganization needs to be reverted:
 ```bash
 cd <target-folder>
 SNAP_DIR=$(ls -1d .tidy-folder-snapshots/* | sort | tail -n 1)
-if [ -d "$SNAP_DIR/full-copy" ]; then
-  rsync -a --delete "$SNAP_DIR/full-copy"/ ./
-else
-  echo "No full-copy snapshot available. Use file-level audit lists only."
-fi
+echo "Use the run's move ledger to reverse mv operations."
+echo "Restore any removed items from $SNAP_DIR/trash/ using the cleanup ledger."
 ```
 
 After restoration, rerun Step 7 (audit) on a quick sample to confirm that the pre-run state was restored and then remove any newly created temporary folders only if intended.

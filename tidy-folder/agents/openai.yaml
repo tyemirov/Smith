@@ -1,4 +1,4 @@
 interface:
   display_name: "Tidy Folder"
-  short_description: "Reorganize a folder with deterministic manifest-based taxonomy and hard low-confidence gating"
-  default_prompt: "Use $Tidy Folder with a role-based manifest flow to build and validate a semantic taxonomy, iterate refinement until low-confidence is zero, then execute only gate-approved moves while preserving project internals." 
+  short_description: "Agent-led folder reorganization using helper evidence, reviewed manifests, and gate-approved execution"
+  default_prompt: "Use $Tidy Folder with an agent-led manifest flow: create a lightweight initial snapshot and active run lock, use helper scripts only to gather evidence and draft artifacts, apply explicit evidence-precedence rules, have Gatekeeper independently challenge representative raw evidence, and execute only supervisor-approved, gate-cleared moves while preserving project internals and routing cleanup into snapshot trash." 

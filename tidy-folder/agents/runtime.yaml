@@ -4,7 +4,9 @@ controller:
   execution: "inherit"
   responsibilities:
     - "Own the full tidy-folder pass state, pass counters, and artifact custody (snapshot paths, manifest files, logs, and supervisor handoff history)."
-    - "Do not proceed to move execution unless Gatekeeper signs off and the manifest is approved with zero low-confidence."
+    - "Own the active run lock/lease under .tidy-folder-snapshots, including creation, heartbeat updates, stale-run takeover, and cleanup on exit."
+    - "Treat helper-produced manifests, confidence scores, and fallback suggestions as advisory only; final taxonomy and move approval belong to the agent roles."
+    - "Do not proceed to move execution unless Gatekeeper signs off on the agent-reviewed manifest and Supervisor authorizes execution."
     - "If execution runs, persist a post-move audit manifest before closing the flow."
     - "Run the role handoff protocol even when no real subagents are spawned; persisted handoff artifacts are the contract."
 
@@ -15,8 +17,8 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.3-codex-spark"
     reasoning_effort: "low"
-    scope: "Create/validate rollback snapshot context, parse user target path, confirm required tooling preconditions, and establish the persistent semantic evidence cache path. Persist the preflight handoff under .tidy-folder-snapshots/<snapshot_id>/handoffs/."
-    controller_handoff: "Only continue if target folder exists, snapshot directory policy is clear, and no conflicting move operation is already in-flight."
+    scope: "Create/validate rollback snapshot context, create or validate the active run lock/lease, parse user target path, confirm helper/tooling preconditions, and establish the persistent semantic evidence cache path. Persist the preflight handoff under .tidy-folder-snapshots/<snapshot_id>/handoffs/."
+    controller_handoff: "Only continue if target folder exists, snapshot directory policy is clear, and the run lock is held by this run. If a fresh conflicting lock exists, stop. If the lock is stale beyond the lease threshold, write a takeover artifact, assume ownership, and continue non-interactively. Helper availability affects evidence gathering only; it does not change agent decision authority."
 
   - id: "tidy-folder-scout"
     agent_type: "worker"
@@ -24,8 +26,8 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.4-mini"
     reasoning_effort: "medium"
-    scope: "Run semantic_scan manifest/autopilot passes as evidence collectors, persist manifest.json, and produce structured low-confidence lists plus per-file signals. This role may run in-process or as a delegated worker, but the artifact contract is the same."
-    controller_handoff: "Return manifest file path, low_confidence count, and evidence packets only. If low_confidence is unchanged or high, explicitly request reconciliation pass or escalation."
+    scope: "Run semantic_scan and related shell probes as evidence collectors, persist manifest.json or equivalent draft artifacts, produce structured low-confidence lists plus per-file signals, and emit grouped evidence packets for representative audit. This role may run in-process or as a delegated worker, but the artifact contract is the same."
+    controller_handoff: "Return helper artifact paths, candidate homes, low-confidence signals, raw evidence packets, grouped evidence summaries, and any high-risk cluster markers only. Do not make final placement decisions. If helper output is weak, conflicting, or unchanged across passes, explicitly request Router/Gatekeeper reconciliation."
 
   - id: "tidy-folder-router"
     agent_type: "worker"
@@ -33,8 +35,8 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.4"
     reasoning_effort: "medium"
-    scope: "Convert scout evidence to proposed manifest entries, apply specificity ladder, enforce existing taxonomy anchors, and generate explicit rationale/alternatives for each candidate. Approved actions must be written as a concrete artifact, not kept only in memory."
-    controller_handoff: "Submit finalized manifest candidate set plus unresolved blockers. Do not approve execution unless all hard blockers are addressed in this handoff."
+    scope: "Own destination decisions. Convert scout evidence and any helper-generated draft manifest into agent-authored manifest entries, apply the explicit evidence-precedence order, enforce existing taxonomy anchors, and generate rationale/alternatives for each candidate. Approved actions must be written as a concrete artifact, not kept only in memory."
+    controller_handoff: "Submit the agent-reviewed manifest candidate set plus unresolved blockers. Explicitly record when helper suggestions were kept, refined, or overridden, and when representative-cluster review was used instead of full-file review. Do not approve execution unless all hard blockers are addressed in this handoff."
 
   - id: "tidy-folder-gatekeeper"
     agent_type: "worker"
@@ -42,8 +44,8 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.3-codex-spark"
     reasoning_effort: "medium"
-    scope: "Validate manifest against hard gates: low_confidence_count==0, no needs_refinement actions, no banned or vague top-level categories, no duplicate taxonomy intent, no X/X nesting, project atomicity intact, and cross-domain tie-breaks explicit. Persist active_gate_failures in the gatekeeper handoff."
-    controller_handoff: "Approval is only valid when all gate checks are green and active_gate_failures is empty. If blocked, provide a concrete correction list and stop."
+    scope: "Validate the agent-authored manifest against hard gates: no unresolved ambiguity, no banned or vague top-level categories, no duplicate taxonomy intent, no X/X nesting, project atomicity intact, and cross-domain tie-breaks explicit. Review raw Scout evidence independently for deletion candidates, sensitive buckets, and representative samples from each major home rather than relying only on Router prose. Treat helper low-confidence counts and helper gate failures as advisory inputs that must be confirmed or overruled explicitly. Persist active_gate_failures and the independent sample log in the gatekeeper handoff."
+    controller_handoff: "Approval is only valid when all gate checks are green, the independent sample review is complete, and active_gate_failures is empty. If helper or Router findings are overridden, include the override rationale. If blocked, provide a concrete correction list and stop."
 
   - id: "tidy-folder-executor"
     agent_type: "worker"
@@ -51,8 +53,8 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.3-codex-spark"
     reasoning_effort: "low"
-    scope: "Execute moves, renames, and deterministic cleanup only under supervisor-approved, gatekeeper-cleared manifest. Preserve project-relative subtrees when the destination is derived from a detected project root. Emit action deltas and post-move verification stats into the executor handoff."
-    controller_handoff: "Report skipped/failed moves, touched paths, and manifest delta. Halt if any operation violates target root, snapshot contract, or post-move drift." 
+    scope: "Execute moves, renames, and deterministic cleanup only under supervisor-approved, gatekeeper-cleared agent manifest. Preserve project-relative subtrees when the destination is derived from a detected project root. Route deletions into the run snapshot trash with a cleanup ledger instead of permanent erase during the active run. Helper-approved actions files are staging artifacts, not execution authority. Emit action deltas and post-move verification stats into the executor handoff."
+    controller_handoff: "Report skipped/failed moves, touched paths, cleanup-ledger entries, and manifest delta. Halt if any operation violates target root, lock ownership, snapshot contract, or post-move drift." 
 
   - id: "tidy-folder-audit-and-report"
     agent_type: "worker"
@@ -60,5 +62,5 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.4-mini"
     reasoning_effort: "medium"
-    scope: "Run final tree audit, produce completion ledger including pass count, refinement history, gate outcomes, and any post-move verification manifest. Ensure final tree is user-readable and deterministic."
-    controller_handoff: "Return final signed completion report or residual unresolved risks for explicit user confirmation." 
+    scope: "Run final tree audit, produce completion ledger including pass count, refinement history, gate outcomes, helper-vs-final decision deltas, and any post-move verification manifest. Ensure final tree is user-readable and deterministic."
+    controller_handoff: "Return final signed completion report or residual unresolved risks. Do not introduce a new confirmation step unless a gate failure prevented safe execution." 
