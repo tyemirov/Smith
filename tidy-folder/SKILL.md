@@ -67,7 +67,7 @@ cd /Users/tyemirov/Development/agentSkills/tidy-folder
 /opt/homebrew/bin/uv run ./scripts/semantic_scan.py /path/to/folder --manifest --autopilot
 ```
 
-- The script uses a `uv` shebang (`#!/usr/bin/env -S uv run --with torch --with torchvision --script`) and declares Python requirements inline, so dependencies are resolved automatically.
+- The script uses a lightweight `uv` shebang (`#!/usr/bin/env -S uv run --script`) and declares the baseline requirements inline, so non-vision scans stay fast.
 - Vision mode is opt-in and explicit (recommended for images/videos):
 
 ```bash
@@ -75,7 +75,7 @@ uv run ./scripts/semantic_scan.py /path/to/folder --manifest --autopilot --visio
 uv run ./scripts/semantic_scan.py /path/to/folder --manifest --autopilot --vision --vision-provider openai
 ```
 
-- Vision dependencies are available via the `uv` launcher; enable multimodal captioning explicitly with `--vision`. Use `--vision-provider openai` to run image/video understanding through an API model (requires `OPENAI_API_KEY`) instead of local BLIP/CLIP-style captioning.
+- Vision dependencies are bootstrapped only when needed. Use `--vision-provider openai` to run image/video understanding through an API model (requires `OPENAI_API_KEY`) without local model downloads; local Hugging Face vision will re-launch through `uv` with the extra vision packages only when `--vision` is requested.
 
 Native tools like `ffmpeg`, `pdftotext`, `tesseract`, `mdls`, `file`, `strings`, and `antiword` are optional accelerators. If a machine does not have them, the scanner still works, but some files will stay low-confidence until enough evidence is available.
 
