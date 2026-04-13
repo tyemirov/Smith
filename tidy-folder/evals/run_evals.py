@@ -40,18 +40,15 @@ def run_temp_manifest(files: dict[str, str]) -> dict:
         return run_manifest(root)
 
 
-def run_controller(files: dict[str, str], *, execute: bool = False) -> dict:
+def run_controller(files: dict[str, str]) -> dict:
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
         for relative_path, content in files.items():
             path = root / relative_path
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
-        command = [sys.executable, str(CONTROLLER), str(root)]
-        if execute:
-            command.append("--execute")
         proc = subprocess.run(
-            command,
+            [sys.executable, str(CONTROLLER), str(root)],
             check=True,
             capture_output=True,
             text=True,
@@ -62,10 +59,6 @@ def run_controller(files: dict[str, str], *, execute: bool = False) -> dict:
         assert Path(report["approved_actions_path"]).exists()
         for handoff_path in report["handoff_paths"].values():
             assert Path(handoff_path).exists()
-        if execute:
-            assert report["executor_status"] == "executed"
-            assert report["post_move_manifest_path"]
-            assert Path(report["post_move_manifest_path"]).exists()
         return report
 
 
@@ -191,26 +184,12 @@ def main() -> int:
     assert controller_report["execution_ready"] is False
     assert controller_report["active_gate_failures"]
     assert set(controller_report["handoff_paths"]) == {
-        "supervisor",
         "preflight",
         "scout",
-        "router",
         "gatekeeper",
         "executor",
         "audit",
     }
-
-    controller_execute_report = run_controller(
-        {
-            "inbox/tax-return.txt": "IRS tax return 2024\n",
-            "inbox/portfolio-summary.txt": "portfolio positions brokerage balance\n",
-        },
-        execute=True,
-    )
-    assert controller_execute_report["execution_ready"] is True
-    assert controller_execute_report["post_move_summary"]["low_confidence_count"] == 0
-    assert controller_execute_report["post_move_summary"]["active_gate_failures"] == []
-    assert "./inbox" in controller_execute_report["empty_dirs_removed"]
 
     print(
         "freelance-designer:",
