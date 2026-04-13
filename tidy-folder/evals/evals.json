@@ -24,6 +24,7 @@
       "assertions": [
         "Code project internal structure (src/, node_modules/, package.json) is preserved",
         "Misplaced files (random PDFs, screenshots) are moved out of the project tree",
+        "Hidden repo markers such as .gitignore influence routing and preserve project atomicity",
         "No modifications to build artifacts or dependency folders"
       ]
     },
@@ -38,7 +39,8 @@
         "Financial docs are separated by purpose (Taxes, Retirement, Banking)",
         "Career docs are preserved but not dumped into a vague 'Old' or 'Archive' folder",
         "Spreadsheet rows can drive Investments routing",
-        "OCR text from a generic image can drive Identity routing"
+        "OCR text from a generic image can drive Identity routing",
+        "Execution remains blocked when only a vague top-level home is available"
       ]
     }
   ]

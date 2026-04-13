@@ -56,15 +56,25 @@ Use the `scripts/semantic_scan.py` helper when it is available. Its job is to ga
 - Candidate homes with evidence and confidence.
 - The contract is to infer a complete taxonomy end-to-end with no manual routing decisions.
 
+Use `scripts/run_tidy_folder.py` for the full end-to-end workflow when you need the runtime contract, not just the evidence collector. It creates the rollback snapshot, persists the manifest, emits supervisor/gatekeeper handoff artifacts, and can optionally execute approved moves once the gates are green.
+
 ### Dependency and execution model
 
 - This skill must use `uv` for Python execution.
 - Do not install deps with `pip`, `pipx`, or global `venv` workflows for this script.
-- Use a self-contained run:
+- Use a self-contained evidence-only run:
 
 ```bash
 cd /Users/tyemirov/Development/agentSkills/tidy-folder
 /opt/homebrew/bin/uv run ./scripts/semantic_scan.py /path/to/folder --manifest --autopilot
+```
+
+- Use the controller for the full orchestrated workflow:
+
+```bash
+cd /Users/tyemirov/Development/agentSkills/tidy-folder
+python3 ./scripts/run_tidy_folder.py /path/to/folder
+python3 ./scripts/run_tidy_folder.py /path/to/folder --execute
 ```
 
 - The script uses a `uv` shebang (`#!/usr/bin/env -S uv run --with torch --with torchvision --script`) and declares Python requirements inline, so dependencies are resolved automatically.
@@ -284,9 +294,11 @@ If pre-existing folders already encode a structure, treat those as starting taxo
 Before moves begin, create a placement manifest as a single source of truth:
 
 ```bash
-cd <target-folder>
-scripts/semantic_scan.py . --manifest --autopilot > .tidy-folder-manifest.json
+cd /Users/tyemirov/Development/agentSkills/tidy-folder
+python3 ./scripts/run_tidy_folder.py <target-folder>
 ```
+
+The controller writes its manifest and handoff records into `./.tidy-folder-snapshots/<snapshot_id>/` inside the target folder, including `manifest.json`, `approved-actions.json`, and per-phase handoff files.
 
 Build the manifest as an iterative artifact:
 - Round 1 must include: source path, proposed destination, evidence source list, and attribution source (`existing_taxonomy`, `filename`, `content`, `metadata`, `ocr`).
