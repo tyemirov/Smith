@@ -42,9 +42,11 @@ import tempfile
 import zipfile
 import urllib.request
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
+import threading
 from xml.etree import ElementTree as ET
 
 try:
@@ -76,6 +78,7 @@ DEFAULT_IGNORES = {
     ".git",
     ".hg",
     ".svn",
+    ".tidy-folder-snapshots",
     "__pycache__",
     ".venv",
     ".localized",
@@ -83,6 +86,22 @@ DEFAULT_IGNORES = {
     "dist",
     "build",
     "coverage",
+}
+
+HIDDEN_DIR_IGNORES = {
+    ".cache",
+    ".idea",
+    ".mypy_cache",
+    ".next",
+    ".nuxt",
+    ".parcel-cache",
+    ".pnpm-store",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".terraform",
+    ".tox",
+    ".turbo",
+    ".yarn",
 }
 
 TEXT_EXTS = {
@@ -119,6 +138,21 @@ DOCX_EXTS = {".docx"}
 PPTX_EXTS = {".pptx"}
 XLSX_EXTS = {".xlsx"}
 OLD_OFFICE_EXTS = {".doc", ".xls", ".ppt"}
+ARCHIVE_EXTS = {".zip", ".dmg", ".tar", ".gz", ".bz2", ".xz", ".7z"}
+KNOWN_KIND_EXTS = (
+    TEXT_EXTS
+    | CSV_EXTS
+    | JSON_EXTS
+    | IMAGE_EXTS
+    | VIDEO_EXTS
+    | AUDIO_EXTS
+    | PDF_EXTS
+    | DOCX_EXTS
+    | PPTX_EXTS
+    | XLSX_EXTS
+    | OLD_OFFICE_EXTS
+    | ARCHIVE_EXTS
+)
 
 SOURCE_WEIGHTS = {
     "path": 3.0,
@@ -971,10 +1005,13 @@ class EvidenceBundle:
 @dataclass
 class ScanRuntimeState:
     project_markers: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    project_homes: dict[str, str] = field(default_factory=dict)
     evidence_cache: dict[str, EvidenceBundle] = field(default_factory=dict)
     cache_hits: int = 0
     cache_misses: int = 0
     cache_dirty: bool = False
+    scan_workers_used: int = 1
+    cache_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 def run_tool(args: list[str], timeout: int = 30) -> tuple[int, str, str]:
@@ -1262,6 +1299,14 @@ def top_level_intent_key(segment: str) -> str:
     return TOP_LEVEL_INTENT_ALIASES.get(normalized, normalized)
 
 
+def should_ignore_dirname(name: str, *, include_ignored: bool = False) -> bool:
+    if include_ignored:
+        return False
+    if name in DEFAULT_IGNORES or name in HIDDEN_DIR_IGNORES:
+        return True
+    return False
+
+
 def collect_project_markers(root: Path) -> dict[str, tuple[str, ...]]:
     if not root.is_dir():
         return {}
@@ -1279,11 +1324,7 @@ def collect_project_markers(root: Path) -> dict[str, tuple[str, ...]]:
                 rel = Path(".")
             key = "" if rel == Path(".") else rel.as_posix().lower()
             marker_map[key] = hits
-        dirnames[:] = [
-            d
-            for d in dirnames
-            if d not in DEFAULT_IGNORES and not d.startswith(".")
-        ]
+        dirnames[:] = [d for d in dirnames if not should_ignore_dirname(d)]
     return marker_map
 
 
@@ -1315,7 +1356,9 @@ def display_project_home(scope_parts: tuple[str, ...]) -> str:
     if not scope_parts:
         return "Projects/Code"
 
-    label_parts = [part for part in re.split(r"[^A-Za-z0-9]+", scope_parts[-1]) if part]
+    label_parts: list[str] = []
+    for scope_part in scope_parts:
+        label_parts.extend(part for part in re.split(r"[^A-Za-z0-9]+", scope_part) if part)
     if not label_parts:
         return "Projects/Code"
 
@@ -1328,10 +1371,32 @@ def display_project_home(scope_parts: tuple[str, ...]) -> str:
     return f"Projects/{pretty}"
 
 
+def build_project_home_map(project_markers: dict[str, tuple[str, ...]]) -> dict[str, str]:
+    keys = sorted(key for key in project_markers if key)
+    split_keys = {key: tuple(part for part in key.split("/") if part) for key in keys}
+    homes: dict[str, str] = {}
+
+    for key in keys:
+        parts = split_keys[key]
+        if not parts:
+            continue
+
+        unique_scope = parts
+        for suffix_length in range(1, len(parts) + 1):
+            suffix = parts[-suffix_length:]
+            if all(split_keys[other][-suffix_length:] != suffix for other in keys if other != key):
+                unique_scope = suffix
+                break
+        homes[key] = display_project_home(unique_scope)
+
+    return homes
+
+
 def infer_project_marker_hints(
     path: Path,
     root: Path,
     project_markers: dict[str, tuple[str, ...]],
+    project_homes: dict[str, str],
 ) -> list[dict[str, Any]]:
     if not project_markers:
         return []
@@ -1349,8 +1414,9 @@ def infer_project_marker_hints(
 
         scope_parts = rel.parts[:depth]
         weight = 1.8 + sum(PROJECT_MARKER_WEIGHTS.get(marker, 2.5) for marker in markers) + (depth * 0.3)
+        home = project_homes.get(key) or display_project_home(scope_parts)
         hint = {
-            "home": display_project_home(scope_parts),
+            "home": home,
             "weight": round(min(weight, 9.5), 2),
             "support_files": len(markers),
             "source": "project_markers",
@@ -1409,9 +1475,29 @@ def detect_kind(path: Path, mime: str) -> str:
         return "audio"
     if ext in TEXT_EXTS or (mime or "").startswith("text/"):
         return "text"
-    if ext in {".zip", ".dmg", ".tar", ".gz", ".bz2", ".xz", ".7z"}:
+    if ext in ARCHIVE_EXTS:
         return "archive"
     return "binary"
+
+
+def guessed_mime_type(path: Path) -> str:
+    guess, _ = mimetypes.guess_type(path.name)
+    return guess or ""
+
+
+def detect_kind_and_mime(path: Path) -> tuple[str, str]:
+    guessed = guessed_mime_type(path)
+    ext = path.suffix.lower()
+    if ext in KNOWN_KIND_EXTS:
+        return guessed or "application/octet-stream", detect_kind(path, guessed)
+
+    if guessed:
+        guessed_kind = detect_kind(path, guessed)
+        if guessed_kind != "binary":
+            return guessed, guessed_kind
+
+    mime = mime_type(path)
+    return mime, detect_kind(path, mime)
 
 
 def mime_type(path: Path) -> str:
@@ -1815,6 +1901,7 @@ VISION_PIPELINE: Any | None = None
 VISION_PIPELINE_MODE: str | None = None
 VISION_PROVIDER: str = "hf"
 VISION_PROVIDER_MODEL: str = ""
+VISION_LOCK = threading.Lock()
 
 
 def vision_pipeline() -> Any | None:
@@ -1824,26 +1911,30 @@ def vision_pipeline() -> Any | None:
     if VISION_PIPELINE is not None or hf_pipeline is None:
         return VISION_PIPELINE
 
-    for model in VISION_MODELS:
-        try:
-            VISION_PIPELINE = hf_pipeline("image-to-text", model=model)
-            VISION_PIPELINE_MODE = "image-to-text"
+    with VISION_LOCK:
+        if VISION_PIPELINE is not None or hf_pipeline is None:
             return VISION_PIPELINE
-        except Exception:
-            VISION_PIPELINE = None
-            VISION_PIPELINE_MODE = None
-            continue
 
-    # Newer transformers builds expose BLIP captioning under `image-text-to-text`.
-    for model in VISION_MODELS:
-        try:
-            VISION_PIPELINE = hf_pipeline("image-text-to-text", model=model)
-            VISION_PIPELINE_MODE = "image-text-to-text"
-            return VISION_PIPELINE
-        except Exception:
-            VISION_PIPELINE = None
-            VISION_PIPELINE_MODE = None
-            continue
+        for model in VISION_MODELS:
+            try:
+                VISION_PIPELINE = hf_pipeline("image-to-text", model=model)
+                VISION_PIPELINE_MODE = "image-to-text"
+                return VISION_PIPELINE
+            except Exception:
+                VISION_PIPELINE = None
+                VISION_PIPELINE_MODE = None
+                continue
+
+        # Newer transformers builds expose BLIP captioning under `image-text-to-text`.
+        for model in VISION_MODELS:
+            try:
+                VISION_PIPELINE = hf_pipeline("image-text-to-text", model=model)
+                VISION_PIPELINE_MODE = "image-text-to-text"
+                return VISION_PIPELINE
+            except Exception:
+                VISION_PIPELINE = None
+                VISION_PIPELINE_MODE = None
+                continue
 
     return None
 
@@ -1955,16 +2046,17 @@ def extract_image_vision_caption(path: Path, max_chars: int = 5000) -> str:
         return ""
 
     try:
-        if VISION_PIPELINE_MODE == "image-text-to-text":
-            outputs = pipe(
-                {
-                    "images": [str(path)],
-                    "text": "Describe this image for file organization in one short sentence.",
-                },
-                max_new_tokens=64,
-            )
-        else:
-            outputs = pipe(str(path), max_new_tokens=64)
+        with VISION_LOCK:
+            if VISION_PIPELINE_MODE == "image-text-to-text":
+                outputs = pipe(
+                    {
+                        "images": [str(path)],
+                        "text": "Describe this image for file organization in one short sentence.",
+                    },
+                    max_new_tokens=64,
+                )
+            else:
+                outputs = pipe(str(path), max_new_tokens=64)
 
         text = _vision_output_to_text(outputs)
         if not text:
@@ -1979,7 +2071,7 @@ def media_files_for_vision_check(paths: list[Path]) -> list[tuple[Path, str]]:
     for path in paths:
         if not path.is_file():
             continue
-        kind = detect_kind(path, mime_type(path))
+        _mime, kind = detect_kind_and_mime(path)
         if kind in {"image", "video"}:
             media_files.append((path, kind))
     return media_files
@@ -2094,7 +2186,12 @@ def extract_video_frame_ocr(path: Path, metadata: dict[str, Any]) -> str:
     return ""
 
 
-def extract_video_frame_vision(path: Path, metadata: dict[str, Any]) -> str:
+def extract_video_frame_vision(
+    path: Path,
+    metadata: dict[str, Any],
+    *,
+    dense_sampling: bool = False,
+) -> str:
     if not tool_exists("ffmpeg"):
         return ""
 
@@ -2106,8 +2203,10 @@ def extract_video_frame_vision(path: Path, metadata: dict[str, Any]) -> str:
 
     if duration <= 0:
         offsets = (0.5,)
-    else:
+    elif dense_sampling:
         offsets = VIDEO_FRAME_SAMPLE_OFFSETS
+    else:
+        offsets = (0.5,)
 
     lines: list[str] = []
     if VISION_PROVIDER != "openai" and vision_pipeline() is None:
@@ -2150,6 +2249,17 @@ def extract_video_frame_vision(path: Path, metadata: dict[str, Any]) -> str:
     return ""
 
 
+def dynamic_record_sources(path: Path, root: Path) -> dict[str, str]:
+    try:
+        relative_path = path.relative_to(root).as_posix().lower()
+    except ValueError:
+        relative_path = path.name.lower()
+    return {
+        "path": relative_path,
+        "name": path.name.lower(),
+    }
+
+
 def extract_sources(
     path: Path,
     root: Path,
@@ -2158,18 +2268,10 @@ def extract_sources(
     *,
     vision_enabled: bool = False,
 ) -> tuple[dict[str, str], dict[str, Any], list[str]]:
-    try:
-        relative_path = path.relative_to(root).as_posix().lower()
-    except ValueError:
-        relative_path = path.name.lower()
-
-    sources: dict[str, str] = {"path": relative_path, "name": path.name.lower()}
+    del root, mime
+    sources: dict[str, str] = {}
     metadata: dict[str, Any] = {}
     notes: list[str] = []
-
-    brief = file_brief(path)
-    if brief:
-        sources["file"] = brief.lower()
 
     if kind == "pdf":
         text = extract_pdf_preview(path)
@@ -2236,14 +2338,11 @@ def extract_sources(
         else:
             notes.append("skipped_image_ocr_low_signal")
         if vision_enabled:
-            if image_supports_text_extraction:
-                vision = extract_image_vision_caption(path)
-                if vision:
-                    sources["vision"] = vision.lower()
-                else:
-                    notes.append("no_image_vision")
+            vision = extract_image_vision_caption(path)
+            if vision:
+                sources["vision"] = vision.lower()
             else:
-                notes.append("skipped_image_vision_low_signal")
+                notes.append("no_image_vision")
     elif kind in {"video", "audio"}:
         metadata = parse_ffprobe(path)
         fallback_metadata = parse_mutagen_media(path)
@@ -2262,17 +2361,24 @@ def extract_sources(
             else:
                 notes.append("skipped_video_ocr_low_signal")
             if vision_enabled:
-                if video_supports_text_extraction:
-                    vision = extract_video_frame_vision(path, metadata)
-                    if vision:
-                        sources["vision"] = vision.lower()
-                    else:
-                        notes.append("no_video_vision")
+                vision = extract_video_frame_vision(
+                    path,
+                    metadata,
+                    dense_sampling=video_supports_text_extraction,
+                )
+                if vision:
+                    sources["vision"] = vision.lower()
                 else:
-                    notes.append("skipped_video_vision_low_signal")
+                    notes.append("no_video_vision")
     elif kind == "archive":
+        brief = file_brief(path)
+        if brief:
+            sources["file"] = brief.lower()
         notes.append("archive_unreadable")
     elif kind == "binary":
+        brief = file_brief(path)
+        if brief:
+            sources["file"] = brief.lower()
         text = extract_binary_preview(path, brief)
         if text:
             sources["text"] = text.lower()
@@ -2315,11 +2421,13 @@ def collect_existing_taxonomy_hints(
     root: Path,
     max_depth: int = TAXONOMY_HINT_MAX_DEPTH,
     project_markers: dict[str, tuple[str, ...]] | None = None,
+    project_homes: dict[str, str] | None = None,
 ) -> dict[str, tuple[str, float, int]]:
     raw_counts: Counter[str] = Counter()
     marker_counts: Counter[str] = Counter()
     canonical_by_key: dict[str, str] = {}
     project_markers = project_markers or {}
+    project_homes = project_homes or {}
 
     for path in paths:
         try:
@@ -2356,7 +2464,7 @@ def collect_existing_taxonomy_hints(
         if not is_meaningful_taxonomy_segment(parts[-1]):
             continue
         marker_counts[key] += len(markers)
-        canonical_by_key[key] = display_project_home(parts)
+        canonical_by_key[key] = project_homes.get(key) or display_project_home(parts)
 
     hints: dict[str, tuple[str, float, int]] = {}
     for key, count in raw_counts.items():
@@ -2636,13 +2744,15 @@ def build_evidence_bundle(
     runtime_state: ScanRuntimeState,
 ) -> tuple[os.stat_result, EvidenceBundle]:
     stat_result = path.stat()
+    dynamic_sources = dynamic_record_sources(path, root)
     vision_signature = "novision"
     if vision_enabled:
         provider_model = resolve_vision_model() if VISION_PROVIDER == "openai" else (VISION_PROVIDER_MODEL or "hf")
         vision_signature = f"vision:{VISION_PROVIDER}:{provider_model}"
     cache_key = json.dumps(
         [
-            str(path),
+            int(getattr(stat_result, "st_dev", 0)),
+            int(getattr(stat_result, "st_ino", 0)),
             int(stat_result.st_size),
             int(stat_result.st_mtime_ns),
             vision_signature,
@@ -2650,36 +2760,55 @@ def build_evidence_bundle(
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    cached = runtime_state.evidence_cache.get(cache_key)
-    if cached is not None:
-        runtime_state.cache_hits += 1
-        return stat_result, cached
+    with runtime_state.cache_lock:
+        cached = runtime_state.evidence_cache.get(cache_key)
+        if cached is not None:
+            runtime_state.cache_hits += 1
+    if cached is None:
+        extracted_sources, metadata, notes = extract_sources(
+            path,
+            root,
+            kind,
+            mime,
+            vision_enabled=vision_enabled,
+        )
+        cached = EvidenceBundle(
+            size=int(stat_result.st_size),
+            mtime=f"{stat_result.st_mtime:.0f}",
+            mtime_ns=int(stat_result.st_mtime_ns),
+            sources={key: value[:4000] for key, value in extracted_sources.items()},
+            metadata=metadata,
+            notes=notes,
+            tokens=[],
+        )
+        with runtime_state.cache_lock:
+            runtime_state.evidence_cache[cache_key] = cached
+            runtime_state.cache_misses += 1
+            runtime_state.cache_dirty = True
 
-    sources, metadata, notes = extract_sources(path, root, kind, mime, vision_enabled=vision_enabled)
+    combined_sources = dict(dynamic_sources)
+    combined_sources.update(cached.sources)
     combined_for_tokens = " ".join(
-        text for source_name, text in sources.items() if source_name != "file"
+        text for source_name, text in combined_sources.items() if source_name != "file"
     )
-    if metadata:
-        metadata_summary = " ".join(flatten_text_values(metadata, limit=5000))
+    if cached.metadata:
+        metadata_summary = " ".join(flatten_text_values(cached.metadata, limit=5000))
         if metadata_summary:
             combined_for_tokens += " " + metadata_summary
     tokens = sorted(set(tokenize_for_summary(combined_for_tokens)))
     bundle = EvidenceBundle(
-        size=int(stat_result.st_size),
-        mtime=f"{stat_result.st_mtime:.0f}",
-        mtime_ns=int(stat_result.st_mtime_ns),
-        sources={key: value[:4000] for key, value in sources.items()},
-        metadata=metadata,
-        notes=notes,
+        size=cached.size,
+        mtime=cached.mtime,
+        mtime_ns=cached.mtime_ns,
+        sources=combined_sources,
+        metadata=cached.metadata,
+        notes=cached.notes,
         tokens=tokens,
     )
-    runtime_state.evidence_cache[cache_key] = bundle
-    runtime_state.cache_misses += 1
-    runtime_state.cache_dirty = True
     return stat_result, bundle
 
 
-EVIDENCE_CACHE_SCHEMA_VERSION = 1
+EVIDENCE_CACHE_SCHEMA_VERSION = 2
 
 
 def load_evidence_cache(path: Path) -> dict[str, EvidenceBundle]:
@@ -3005,8 +3134,7 @@ def scan_file(
     autopilot: bool = False,
     vision: bool = False,
 ) -> tuple[FileRecord, set[str]]:
-    mime = mime_type(path)
-    kind = detect_kind(path, mime)
+    mime, kind = detect_kind_and_mime(path)
     stat_result, bundle = build_evidence_bundle(
         path,
         root,
@@ -3017,7 +3145,7 @@ def scan_file(
     )
     file_taxonomy_hints = merge_context_hints(
         infer_taxonomy_hints(path, root, taxonomy_hints),
-        infer_project_marker_hints(path, root, runtime_state.project_markers),
+        infer_project_marker_hints(path, root, runtime_state.project_markers, runtime_state.project_homes),
     )
     top_candidates, confidence, suggested_home, needs_refinement = score_record(
         bundle.sources, kind, existing_taxonomy_hints=file_taxonomy_hints
@@ -3054,16 +3182,16 @@ def scan_file(
                     "evidence": [f"fallback:{flag}"],
                 }
             ]
-            record.suggested_home = home
+            record.suggested_home = None
             record.final_home, record.placement_mode = resolve_final_home(
                 kind,
-                record.suggested_home,
+                None,
                 record.top_candidates,
                 autopilot=autopilot,
             )
             record.confidence = confidence
-            record.needs_refinement = False
-            record.flags = sorted(set(record.flags + [flag]))
+            record.needs_refinement = True
+            record.flags = sorted(set(record.flags + [flag, "fallback_candidate_requires_review"]))
     return record, set(bundle.tokens)
 
 
@@ -3075,15 +3203,9 @@ def walk_files(root: Path, include_ignored: bool = False) -> Iterable[Path]:
     for dirpath, dirnames, filenames in os.walk(root):
         current = Path(dirpath)
         if not include_ignored:
-            dirnames[:] = [
-                d
-                for d in dirnames
-                if d not in DEFAULT_IGNORES and not d.startswith(".")
-            ]
+            dirnames[:] = [d for d in dirnames if not should_ignore_dirname(d)]
         for filename in filenames:
             if filename in {".DS_Store", ".localized", "Thumbs.db", "desktop.ini"}:
-                continue
-            if filename.startswith(".") and filename.lower() not in PROJECT_MARKER_FILES:
                 continue
             if filename.startswith("._"):
                 continue
@@ -3174,7 +3296,8 @@ def json_output(
             home_counts["Unresolved/Unmapped"] += 1
 
     helper_blockers_present = bool(low_confidence_count or active_gate_failures)
-    helper_ready_for_agent_review = not helper_blockers_present
+    helper_ready_for_execution = not helper_blockers_present
+    draft_status = "ready_for_execution" if helper_ready_for_execution else "needs_reconciliation"
     payload = {
         "root": str(root),
         "file_count": len(records),
@@ -3182,12 +3305,12 @@ def json_output(
         "needs_refinement": low_confidence_count > 0,
         "active_gate_failures": active_gate_failures,
         "helper_blockers_present": helper_blockers_present,
-        "helper_ready_for_agent_review": helper_ready_for_agent_review,
-        "draft_review_state": "ready_for_agent_review" if helper_ready_for_agent_review else "needs_agent_reconciliation",
-        "requires_agent_review": True,
+        "helper_ready_for_execution": helper_ready_for_execution,
+        "draft_status": draft_status,
         "execution_blocked": helper_blockers_present,
-        "execution_ready": helper_ready_for_agent_review,
+        "execution_ready": helper_ready_for_execution,
         "cache_stats": cache_stats(runtime_state),
+        "scan_workers_used": runtime_state.scan_workers_used,
         "home_counts": dict(home_counts),
         "kind_counts": dict(kind_counts),
         "project_terms": term_summary,
@@ -3260,10 +3383,8 @@ def manifest_output(
         build_manifest_entry(rec, entry_gate_failures=entry_gate_failures.get(rec.path, []))
         for rec in records
     ]
-    helper_ready_for_agent_review = not helper_blockers_present
-    draft_review_state = (
-        "ready_for_agent_review" if helper_ready_for_agent_review else "needs_agent_reconciliation"
-    )
+    helper_ready_for_execution = not helper_blockers_present
+    draft_status = "ready_for_execution" if helper_ready_for_execution else "needs_reconciliation"
 
     payload = {
         "root": str(root),
@@ -3272,28 +3393,81 @@ def manifest_output(
         "needs_refinement": len(low_confidence) > 0,
         "active_gate_failures": active_gate_failures,
         "helper_blockers_present": helper_blockers_present,
-        "helper_ready_for_agent_review": helper_ready_for_agent_review,
-        "draft_review_state": draft_review_state,
-        "requires_agent_review": True,
+        "helper_ready_for_execution": helper_ready_for_execution,
+        "draft_status": draft_status,
         "execution_blocked": helper_blockers_present,
+        "execution_ready": helper_ready_for_execution,
         "execution_mode": "autopilot" if autopilot else "review_mode",
         "manifest_iterations": refinement_iterations,
         "cache_stats": cache_stats(runtime_state),
+        "scan_workers_used": runtime_state.scan_workers_used,
         "project_terms": term_summary,
         "taxonomy_hints": summarize_taxonomy_seeds(taxonomy_hints),
         "entries": entries,
         "low_confidence": low_confidence,
         "next_actions": {
             "requires_refinement_pass": helper_blockers_present,
-            "requires_agent_reconciliation": helper_blockers_present,
+            "requires_reconciliation": helper_blockers_present,
             "description": "Review helper evidence and draft candidates, reconcile blockers, then decide whether to execute",
-            "agent_review_required": True,
-            "helper_ready_for_agent_review": helper_ready_for_agent_review,
-            "execution_ready": helper_ready_for_agent_review,
+            "helper_ready_for_execution": helper_ready_for_execution,
+            "execution_ready": helper_ready_for_execution,
         },
     }
     json.dump(payload, sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
+
+
+def resolve_scan_workers(file_count: int) -> int:
+    env_value = os.environ.get("TIDY_FOLDER_SCAN_WORKERS", "").strip()
+    if env_value:
+        try:
+            return max(1, min(int(env_value), max(file_count, 1)))
+        except ValueError:
+            pass
+    if file_count <= 1:
+        return 1
+    return max(2, min(8, os.cpu_count() or 4, file_count))
+
+
+def scan_file_with_fallback(
+    path: Path,
+    *,
+    root: Path,
+    taxonomy_hints: dict[str, tuple[str, float, int]],
+    autopilot: bool,
+    vision: bool,
+    runtime_state: ScanRuntimeState,
+) -> tuple[FileRecord, set[str]]:
+    try:
+        return scan_file(
+            path,
+            root=root,
+            taxonomy_hints=taxonomy_hints,
+            runtime_state=runtime_state,
+            autopilot=autopilot,
+            vision=vision,
+        )
+    except Exception as exc:  # defensive: scanner should not die on one bad file
+        final_home, placement_mode = resolve_final_home("unreadable", None, [], autopilot=autopilot)
+        record = FileRecord(
+            path=str(path),
+            kind="unreadable",
+            mime="application/octet-stream",
+            size=0,
+            mtime="0",
+            sources=dynamic_record_sources(path, root),
+            metadata={},
+            top_candidates=[],
+            suggested_home=None,
+            taxonomy_hints=[],
+            final_home=final_home,
+            placement_mode=placement_mode,
+            confidence=0.0,
+            needs_refinement=True,
+            flags=[f"scan_error:{exc.__class__.__name__}"],
+            tokens=[],
+        )
+        return record, set()
 
 
 def scan_records_with_hints(
@@ -3306,42 +3480,41 @@ def scan_records_with_hints(
 ) -> tuple[list[FileRecord], list[dict[str, Any]], dict[str, set[str]]]:
     records: list[FileRecord] = []
     file_tokens: dict[str, set[str]] = {}
+    file_paths = [path for path in paths if path.is_file()]
+    worker_count = resolve_scan_workers(len(file_paths))
+    runtime_state.scan_workers_used = worker_count
 
-    for path in paths:
-        if not path.is_file():
-            continue
-        try:
-            record, tokens = scan_file(
+    if worker_count == 1:
+        for path in file_paths:
+            record, tokens = scan_file_with_fallback(
                 path,
                 root=root,
                 taxonomy_hints=taxonomy_hints,
-                runtime_state=runtime_state,
                 autopilot=autopilot,
                 vision=vision,
+                runtime_state=runtime_state,
             )
-        except Exception as exc:  # defensive: scanner should not die on one bad file
-            final_home, placement_mode = resolve_final_home("unreadable", None, [], autopilot=autopilot)
-            record = FileRecord(
-                path=str(path),
-                kind="unreadable",
-                mime="application/octet-stream",
-                size=0,
-                mtime="0",
-                sources={"path": str(path).lower(), "name": path.name.lower()},
-                metadata={},
-                top_candidates=[],
-                suggested_home=None,
-                taxonomy_hints=[],
-                final_home=final_home,
-                placement_mode=placement_mode,
-                confidence=0.0,
-                needs_refinement=True,
-                flags=[f"scan_error:{exc.__class__.__name__}"],
-                tokens=[],
-            )
-            tokens = set()
-        records.append(record)
-        file_tokens[str(path)] = tokens
+            records.append(record)
+            file_tokens[str(path)] = tokens
+    else:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            future_map = {
+                executor.submit(
+                    scan_file_with_fallback,
+                    path,
+                    root=root,
+                    taxonomy_hints=taxonomy_hints,
+                    autopilot=autopilot,
+                    vision=vision,
+                    runtime_state=runtime_state,
+                ): path
+                for path in file_paths
+            }
+            for future in as_completed(future_map):
+                path = future_map[future]
+                record, tokens = future.result()
+                records.append(record)
+                file_tokens[str(path)] = tokens
 
     records.sort(key=lambda item: item.path)
     term_summary = summarize_terms(file_tokens)
@@ -3408,7 +3581,11 @@ def main() -> int:
 
     paths = list(walk_files(root, include_ignored=args.include_ignored))
     cache_file = Path(args.cache_file).expanduser().resolve() if args.cache_file else None
-    runtime_state = ScanRuntimeState(project_markers=collect_project_markers(root))
+    project_markers = collect_project_markers(root)
+    runtime_state = ScanRuntimeState(
+        project_markers=project_markers,
+        project_homes=build_project_home_map(project_markers),
+    )
     if cache_file is not None:
         runtime_state.evidence_cache = load_evidence_cache(cache_file)
 
@@ -3427,6 +3604,7 @@ def main() -> int:
         paths,
         root,
         project_markers=runtime_state.project_markers,
+        project_homes=runtime_state.project_homes,
     )
     taxonomy_hints = dict(base_taxonomy_hints)
 

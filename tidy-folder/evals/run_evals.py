@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import base64
 import json
 import shutil
 import subprocess
@@ -15,6 +16,9 @@ SCANNER = ROOT.parent / "scripts" / "semantic_scan.py"
 CONTROLLER = ROOT.parent / "scripts" / "run_tidy_folder.py"
 SETUP = ROOT / "setup_fixtures.sh"
 UV = Path("/opt/homebrew/bin/uv")
+BLANK_PNG_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9p6k9n8AAAAASUVORK5CYII="
+)
 
 
 def build_fixtures() -> None:
@@ -34,52 +38,59 @@ def run_manifest(fixture: Path) -> dict:
 def run_temp_manifest(files: dict[str, str]) -> dict:
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
-        for relative_path, content in files.items():
-            path = root / relative_path
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
+        seed_files(root, files)
         return run_manifest(root)
 
 
-def run_controller(files: dict[str, str], *, execute: bool = False) -> dict:
-    with tempfile.TemporaryDirectory() as tmpdir:
-        root = Path(tmpdir)
-        for relative_path, content in files.items():
-            path = root / relative_path
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
-        command = [sys.executable, str(CONTROLLER), str(root)]
-        if execute:
-            command.append("--execute")
-        proc = subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        report = json.loads(proc.stdout)
-        assert Path(report["snapshot_path"]).exists()
+def seed_files(root: Path, files: dict[str, str]) -> None:
+    for relative_path, content in files.items():
+        path = root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+
+def run_controller_command(root: Path, *extra_args: str, check: bool = True) -> tuple[subprocess.CompletedProcess[str], dict]:
+    proc = subprocess.run(
+        [sys.executable, str(CONTROLLER), str(root), *extra_args],
+        check=check,
+        capture_output=True,
+        text=True,
+    )
+    report = json.loads(proc.stdout)
+    return proc, report
+
+
+def load_json(path: str | Path) -> dict:
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def assert_snapshot_inventory(report: dict) -> None:
+    inventory = report["inventory"]
+    assert Path(inventory["tree_path"]).exists()
+    assert Path(inventory["files_path"]).exists()
+    assert Path(inventory["metadata_path"]).exists()
+
+
+def assert_controller_artifacts(report: dict, *, expect_manifest: bool) -> None:
+    assert Path(report["snapshot_path"]).exists()
+    assert Path(report["draft_actions_path"]).exists()
+    assert_snapshot_inventory(report)
+    if expect_manifest:
+        assert Path(report["helper_manifest_path"]).exists()
         assert Path(report["manifest_path"]).exists()
-        assert Path(report["draft_actions_path"]).exists()
-        assert Path(report["approved_actions_path"]).exists()
-        for handoff_path in report["handoff_paths"].values():
-            assert Path(handoff_path).exists()
-        if execute:
-            assert report["executor_status"] == "executed"
-            assert report["post_move_manifest_path"]
-            assert Path(report["post_move_manifest_path"]).exists()
-        return report
+    else:
+        assert report["helper_manifest_path"] is None
+        assert report["manifest_path"] is None
+    if report["move_ledger_path"] is not None:
+        assert Path(report["move_ledger_path"]).exists()
+    if report["restore_report_path"] is not None:
+        assert Path(report["restore_report_path"]).exists()
+    for handoff_path in report["handoff_paths"].values():
+        assert Path(handoff_path).exists()
 
 
 def entry_map(payload: dict) -> dict[str, dict]:
     return {Path(entry["source_path"]).name: entry for entry in payload["entries"]}
-
-
-def find_entry(payload: dict, filename: str) -> dict:
-    for entry in payload["entries"]:
-        if Path(entry["source_path"]).name == filename:
-            return entry
-    raise KeyError(filename)
 
 
 def find_entry_by_suffix(payload: dict, suffix: str) -> dict:
@@ -98,15 +109,32 @@ def evidence_contains(entry: dict, prefix: str, token: str) -> bool:
 def assert_manifest_ready(payload: dict) -> None:
     assert payload["low_confidence_count"] == 0
     assert payload["active_gate_failures"] == []
-    assert payload["helper_ready_for_agent_review"] is True
-    assert payload["draft_review_state"] == "ready_for_agent_review"
-    assert payload["requires_agent_review"] is True
+    assert payload["helper_ready_for_execution"] is True
+    assert payload["draft_status"] == "ready_for_execution"
     assert payload["execution_blocked"] is False
+    assert payload["execution_ready"] is True
     assert payload["next_actions"]["execution_ready"] is True
+
+
+def assert_manifest_needs_reconciliation(payload: dict) -> None:
+    assert payload["low_confidence_count"] > 0
+    assert payload["helper_ready_for_execution"] is False
+    assert payload["draft_status"] == "needs_reconciliation"
+    assert payload["execution_blocked"] is True
+    assert payload["execution_ready"] is False
+    assert payload["next_actions"]["execution_ready"] is False
 
 
 def main() -> int:
     build_fixtures()
+
+    missing_target = subprocess.run(
+        [sys.executable, str(CONTROLLER)],
+        capture_output=True,
+        text=True,
+    )
+    assert missing_target.returncode == 2
+    assert "folder" in missing_target.stderr.lower()
 
     payloads = {
         "freelance-designer": run_manifest(ROOT / "fixtures" / "freelance-designer" / "test-folder"),
@@ -118,8 +146,11 @@ def main() -> int:
     retiree = entry_map(payloads["retiree-documents"])
     polluted = entry_map(payloads["polluted-project"])
 
-    for payload in payloads.values():
-        assert_manifest_ready(payload)
+    assert_manifest_ready(payloads["freelance-designer"])
+    assert_manifest_ready(payloads["polluted-project"])
+    assert_manifest_needs_reconciliation(payloads["retiree-documents"])
+    assert payloads["freelance-designer"]["scan_workers_used"] > 1
+    assert payloads["polluted-project"]["scan_workers_used"] > 1
 
     assert freelance["alice-report-card-q2.pdf"]["proposed_destination"] == "Kids/School"
     assert freelance["client-brief-rebrand.docx"]["proposed_destination"] == "Business/Client-Work"
@@ -149,7 +180,8 @@ def main() -> int:
     assert retiree["grandkids-birthday-2024.heic"]["proposed_destination"] == "Family/Memories"
     assert retiree["grandkids-recital-video.mp4"]["proposed_destination"] == "Family/Memories"
     assert retiree["resume-1998.docx"]["proposed_destination"] == "Career/Engineering"
-    assert retiree["unknown.dat"]["proposed_destination"] == "Recovery/Unknown-Text"
+    assert retiree["unknown.dat"]["proposed_destination"] is None
+    assert retiree["unknown.dat"]["attribution"]["primary_signal"] == "Recovery/Unknown-Text"
 
     if shutil.which("tesseract"):
         assert retiree["scan-001.png"]["proposed_destination"] == "Identity/Passport"
@@ -169,6 +201,19 @@ def main() -> int:
     )
     assert hidden_marker_entries["notes.txt"]["proposed_destination"] == "Projects/Code"
     assert hidden_marker_payload["execution_blocked"] is False
+    assert hidden_marker_payload["helper_ready_for_execution"] is True
+
+    hidden_project_files_payload = run_temp_manifest(
+        {
+            "demo/package.json": '{"name":"demo"}\n',
+            "demo/.env": "API_KEY=demo\n",
+            "demo/.editorconfig": "root = true\n",
+        }
+    )
+    hidden_env = find_entry_by_suffix(hidden_project_files_payload, "demo/.env")
+    hidden_editorconfig = find_entry_by_suffix(hidden_project_files_payload, "demo/.editorconfig")
+    assert hidden_env["proposed_destination"] == "Projects/Demo"
+    assert hidden_editorconfig["proposed_destination"] == "Projects/Demo"
 
     multi_project_payload = run_temp_manifest(
         {
@@ -189,51 +234,109 @@ def main() -> int:
     assert moving_map_readme["proposed_destination"] == "Projects/Moving-Map"
     assert chess_readme["proposed_destination"] == "Projects/Chess-P2P"
 
+    same_leaf_project_payload = run_temp_manifest(
+        {
+            "alpha/site/package.json": '{"name":"alpha-site"}\n',
+            "alpha/site/src/index.ts": "export const alpha = 'site';\n",
+            "beta/site/package.json": '{"name":"beta-site"}\n',
+            "beta/site/src/index.ts": "export const beta = 'site';\n",
+        }
+    )
+    alpha_site_package = find_entry_by_suffix(same_leaf_project_payload, "alpha/site/package.json")
+    beta_site_package = find_entry_by_suffix(same_leaf_project_payload, "beta/site/package.json")
+    assert alpha_site_package["proposed_destination"] == "Projects/Alpha-Site"
+    assert beta_site_package["proposed_destination"] == "Projects/Beta-Site"
+    assert alpha_site_package["proposed_destination"] != beta_site_package["proposed_destination"]
+
     nested_generic_payload = run_temp_manifest(
         {"Work/Projects/demo-notes.txt": "prototype walkthrough for demo recording\n"}
     )
     nested_generic_entry = entry_map(nested_generic_payload)["demo-notes.txt"]
-    assert nested_generic_entry["proposed_destination"] == "Recovery/Unknown-Text"
-    assert nested_generic_payload["active_gate_failures"] == []
+    assert_manifest_needs_reconciliation(nested_generic_payload)
+    assert nested_generic_entry["proposed_destination"] is None
+    assert nested_generic_entry["attribution"]["primary_signal"] == "Recovery/Unknown-Text"
 
     generic_projects_payload = run_temp_manifest(
         {"demo-notes.txt": "prototype walkthrough for demo recording\n"}
     )
     generic_projects_entry = entry_map(generic_projects_payload)["demo-notes.txt"]
-    assert generic_projects_payload["execution_blocked"] is False
-    assert generic_projects_payload["next_actions"]["execution_ready"] is True
-    assert generic_projects_entry["proposed_destination"] == "Recovery/Unknown-Text"
-    assert generic_projects_payload["active_gate_failures"] == []
+    assert_manifest_needs_reconciliation(generic_projects_payload)
+    assert generic_projects_entry["proposed_destination"] is None
+    assert generic_projects_entry["attribution"]["primary_signal"] == "Recovery/Unknown-Text"
 
-    controller_report = run_controller(
-        {"demo-notes.txt": "prototype walkthrough for demo recording\n"}
-    )
-    assert controller_report["execution_ready"] is True
-    assert controller_report["helper_ready_for_agent_review"] is True
-    assert controller_report["requires_agent_review"] is True
-    assert controller_report["active_gate_failures"] == []
-    assert set(controller_report["handoff_paths"]) == {
-        "supervisor",
-        "preflight",
-        "scout",
-        "router",
-        "gatekeeper",
-        "executor",
-        "audit",
-    }
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        seed_files(
+            root,
+            {
+                "inbox/tax-return.txt": "IRS tax return 2024\n",
+                "inbox/portfolio-summary.txt": "portfolio positions brokerage balance\n",
+            },
+        )
+        _draft_proc, controller_report = run_controller_command(root)
+        assert_controller_artifacts(controller_report, expect_manifest=True)
+        assert controller_report["execution_ready"] is True
+        assert controller_report["helper_ready_for_execution"] is True
+        assert controller_report["draft_status"] == "ready_for_execution"
+        assert controller_report["active_gate_failures"] == []
+        assert set(controller_report["handoff_paths"]) == {
+            "supervisor",
+            "preflight",
+            "scout",
+            "router",
+            "gatekeeper",
+            "executor",
+            "audit",
+        }
+        router_handoff = load_json(controller_report["handoff_paths"]["router"])
+        gatekeeper_handoff = load_json(controller_report["handoff_paths"]["gatekeeper"])
+        draft_actions = load_json(controller_report["draft_actions_path"])
+        assert router_handoff["status"] == "ready_for_execution"
+        assert gatekeeper_handoff["status"] == "cleared_for_execution"
+        assert draft_actions["execution_ready"] is True
+        assert len(draft_actions["draft_actions"]) == 2
 
-    controller_execute_report = run_controller(
-        {
-            "inbox/tax-return.txt": "IRS tax return 2024\n",
-            "inbox/portfolio-summary.txt": "portfolio positions brokerage balance\n",
-        },
-        execute=True,
-    )
-    assert controller_execute_report["execution_ready"] is True
-    assert controller_execute_report["helper_execution_status"] == "executed"
-    assert controller_execute_report["post_move_summary"]["low_confidence_count"] == 0
-    assert controller_execute_report["post_move_summary"]["active_gate_failures"] == []
-    assert "./inbox" in controller_execute_report["empty_dirs_removed"]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        seed_files(
+            root,
+            {
+                "inbox/tax-return.txt": "IRS tax return 2024\n",
+                "inbox/portfolio-summary.txt": "portfolio positions brokerage balance\n",
+            },
+        )
+        _execute_proc, controller_execute_report = run_controller_command(root, "--execute")
+        assert_controller_artifacts(controller_execute_report, expect_manifest=True)
+        assert controller_execute_report["execution_ready"] is True
+        assert controller_execute_report["executor_status"] == "executed"
+        assert controller_execute_report["helper_execution_status"] == "executed"
+        assert controller_execute_report["post_move_summary"]["low_confidence_count"] == 0
+        assert controller_execute_report["post_move_summary"]["active_gate_failures"] == []
+        assert "./inbox" in controller_execute_report["empty_dirs_removed"]
+
+        move_ledger = load_json(controller_execute_report["move_ledger_path"])
+        moved_destinations = [
+            Path(delta["destination_path"])
+            for delta in move_ledger["action_deltas"]
+            if delta["status"] == "moved"
+        ]
+        assert moved_destinations
+
+        _restore_proc, restore_report = run_controller_command(
+            root,
+            "--restore-snapshot",
+            controller_execute_report["snapshot_id"],
+        )
+        assert_controller_artifacts(restore_report, expect_manifest=False)
+        assert restore_report["executor_status"] == "restored"
+        assert restore_report["restore_status"] in {"restored", "restored_with_warnings"}
+        assert restore_report["restore_snapshot_id"] == controller_execute_report["snapshot_id"]
+        assert (root / "inbox/tax-return.txt").exists()
+        assert (root / "inbox/portfolio-summary.txt").exists()
+        assert all(not path.exists() for path in moved_destinations)
+        restore_artifact = load_json(restore_report["restore_report_path"])
+        assert restore_artifact["restore_snapshot_id"] == controller_execute_report["snapshot_id"]
+        assert restore_artifact["restored_moves"] == len(moved_destinations)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
@@ -261,6 +364,67 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
+        cache_path = root / "semantic-cache.json"
+        (root / "tax-return.txt").write_text("IRS tax return 2024\n", encoding="utf-8")
+        first = json.loads(
+            subprocess.run(
+                [
+                    str(UV),
+                    "run",
+                    str(SCANNER),
+                    str(root),
+                    "--manifest",
+                    "--autopilot",
+                    "--cache-file",
+                    str(cache_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        )
+        second = json.loads(
+            subprocess.run(
+                [
+                    str(UV),
+                    "run",
+                    str(SCANNER),
+                    str(root),
+                    "--manifest",
+                    "--autopilot",
+                    "--cache-file",
+                    str(cache_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        )
+        (root / "Finance").mkdir(parents=True, exist_ok=True)
+        shutil.move(str(root / "tax-return.txt"), str(root / "Finance/tax-return.txt"))
+        third = json.loads(
+            subprocess.run(
+                [
+                    str(UV),
+                    "run",
+                    str(SCANNER),
+                    str(root),
+                    "--manifest",
+                    "--autopilot",
+                    "--cache-file",
+                    str(cache_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        )
+        assert first["cache_stats"]["misses"] > 0
+        assert second["cache_stats"]["hits"] > 0
+        assert third["cache_stats"]["hits"] > 0
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
         (root / "demo-notes.txt").write_text("prototype walkthrough for demo recording\n", encoding="utf-8")
         lock_dir = root / ".tidy-folder-snapshots"
         lock_dir.mkdir(parents=True, exist_ok=True)
@@ -283,8 +447,8 @@ def main() -> int:
         )
         assert proc.returncode == 2
         report = json.loads(proc.stdout)
-        assert report["draft_review_state"] == "blocked_by_run_lock"
-        assert report["helper_ready_for_agent_review"] is False
+        assert report["draft_status"] == "blocked_by_run_lock"
+        assert report["helper_ready_for_execution"] is False
         assert report["run_lock_released"] is False
         assert Path(report["draft_actions_path"]).exists()
         assert any(
@@ -326,18 +490,34 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
+        (root / "passport.png").write_bytes(BLANK_PNG_BYTES)
+        helper_payload = run_manifest(root)
+        helper_passport = entry_map(helper_payload)["passport.png"]
+        assert helper_payload["execution_ready"] is True
+        assert helper_passport["proposed_destination"] == "Identity/Passport"
+
+        _controller_proc, controller_report = run_controller_command(root)
+        assert_controller_artifacts(controller_report, expect_manifest=True)
+        assert controller_report["helper_ready_for_execution"] is True
+        assert controller_report["execution_ready"] is False
+        assert controller_report["helper_execution_status"] == "blocked_by_controller_review"
+        assert any(
+            failure["code"] == "controller_sensitive_requires_direct_evidence"
+            for failure in controller_report["active_gate_failures"]
+        )
+        reviewed_manifest = load_json(controller_report["manifest_path"])
+        reviewed_passport = entry_map(reviewed_manifest)["passport.png"]
+        assert reviewed_passport["proposed_destination"] is None
+        assert reviewed_passport["controller_review"]["decision"] == "block"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
         (root / "moving_map/src").mkdir(parents=True, exist_ok=True)
         (root / "moving_map/package.json").write_text('{"name":"moving_map"}\n', encoding="utf-8")
         (root / "moving_map/README.md").write_text("# moving_map\ninteractive map prototype\n", encoding="utf-8")
         (root / "moving_map/src/index.ts").write_text("export const app = 'moving_map';\n", encoding="utf-8")
-        proc = subprocess.run(
-            [sys.executable, str(CONTROLLER), str(root), "--execute"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        report = json.loads(proc.stdout)
-        assert report["execution_ready"] is True
+        _execute_proc, report = run_controller_command(root, "--execute")
+        assert report["executor_status"] == "executed"
         assert (root / "Projects/Moving-Map/package.json").exists()
         assert (root / "Projects/Moving-Map/README.md").exists()
         assert (root / "Projects/Moving-Map/src/index.ts").exists()

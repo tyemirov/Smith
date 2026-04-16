@@ -1,7 +1,7 @@
 ---
 name: tidy-folder
 description: |
-  Reorganize messy folders into a clean, discoverable structure based on the user's life domains and interests -- not by file type. Use this skill whenever the user asks to organize, tidy, clean up, sort, or declutter any folder or directory. Also trigger when users mention their Downloads folder is a mess, want to restructure a project directory, need to make files easier to find, or describe any folder as "chaotic", "cluttered", or "hard to navigate". This skill applies to any directory -- Downloads, Documents, project folders, shared drives, photo libraries, or any other folder the user wants organized.
+  Reorganize messy folders into a clean, discoverable structure based on the user's life domains and interests -- not by file type. Use this skill whenever the user asks to organize, tidy, clean up, sort, or declutter any folder or directory. Only use it when the target folder is explicitly provided or clearly identified in the request; if no target folder is specified, stop and ask for one. This skill applies to any directory -- Downloads, Documents, project folders, shared drives, photo libraries, or any other folder the user wants organized.
 ---
 
 # Tidy Folder
@@ -77,20 +77,21 @@ When signals conflict, resolve them in this order:
 
 ## Decision Authority
 
-This skill is **agent-led**.
+This skill is **snapshot-first and role-audited**.
 
 - Helper scripts gather evidence, persist artifacts, and may propose candidate homes.
-- Helper scripts do **not** decide final taxonomy.
-- Helper scripts do **not** clear ambiguity.
-- Helper scripts do **not** approve execution.
-- The AI role graph does that work:
+- Helper scripts do **not** decide final taxonomy on their own.
+- The controller always creates a rollback snapshot and run lock before scanning or restoring.
+- The skill requires an explicit target folder. Do not infer a folder or pick one on the user's behalf when none was provided.
+- Execution safety comes from the current run being free of blockers plus explicit snapshot restoration support, not from separate approval artifacts.
+- The role graph still matters:
   - `Scout` gathers evidence.
-  - `Router` makes placement decisions.
-  - `Gatekeeper` challenges and approves or blocks those decisions.
-  - `Supervisor` owns the run state and decides whether execution is safe.
-  - `Executor` performs only agent-approved moves.
+  - `Router` records placement decisions and rationale.
+  - `Gatekeeper` challenges weak placements and blocks ambiguous execution.
+  - `Supervisor` owns run state, snapshots, and lock/lease behavior.
+  - `Executor` performs only current-run moves that cleared the validation gates.
 
-If helper output conflicts with stronger file-level evidence, existing taxonomy, or cross-file context, the agents must override the helper output and record why.
+If helper output conflicts with stronger file-level evidence, existing taxonomy, or cross-file context, the workflow must override the helper output and record why in the handoff artifacts.
 
 ## Recommended Tooling
 
@@ -106,26 +107,29 @@ Use the `scripts/semantic_scan.py` helper when it is available. Its job is to ga
 - The helper contract is to surface evidence packets and draft candidate homes that agents review. Its outputs are advisory, not authoritative.
 - The controller-backed workflow reuses a persistent evidence cache under `./.tidy-folder-snapshots/semantic-evidence-cache.json` so repeated manifest/audit passes do not re-extract every unchanged file.
 
-Use `scripts/run_tidy_folder.py` when you want helper-generated artifacts around the agent workflow, not as the source of authority. It creates the rollback snapshot, persists draft manifests and handoff artifacts, and can stage execution artifacts for the agent graph to review.
+Use `scripts/run_tidy_folder.py` for the full workflow. It creates the rollback snapshot for the provided folder, persists draft manifests and handoff artifacts, executes immediately when the current run is clear, and can restore any prior execution snapshot by id.
 
 ### Dependency and execution model
 
 - This skill must use `uv` for Python execution.
 - Do not install deps with `pip`, `pipx`, or global `venv` workflows for this script.
-- Use a self-contained evidence-only run:
+- For helper debugging only, you may inspect evidence directly with:
 
 ```bash
 cd /Users/tyemirov/Development/agentSkills/tidy-folder
 /opt/homebrew/bin/uv run ./scripts/semantic_scan.py /path/to/folder --manifest --autopilot
 ```
 
-- Use the controller for the full orchestrated workflow:
+- For actual skill use, always start with the controller so the folder is snapshotted before any scan or move:
 
 ```bash
 cd /Users/tyemirov/Development/agentSkills/tidy-folder
 python3 ./scripts/run_tidy_folder.py /path/to/folder
 python3 ./scripts/run_tidy_folder.py /path/to/folder --execute
+python3 ./scripts/run_tidy_folder.py /path/to/folder --restore-snapshot <snapshot_id>
 ```
+
+- Do not run the skill against an unspecified folder. If the user did not name a folder, ask for the folder first.
 
 - The script uses a lightweight `uv` shebang (`#!/usr/bin/env -S uv run --script`) and declares its baseline Python requirements inline, so ordinary non-vision scans do not pay the local vision-model install cost.
 - Vision mode is opt-in and explicit (recommended for images/videos):
@@ -144,8 +148,8 @@ Native tools like `ffmpeg`, `pdftotext`, `tesseract`, `mdls`, `file`, `strings`,
 Treat the script as an evidence collector and artifact writer. The skill's AI agents produce the inferred taxonomy without user intervention.
 - `needs_review` is not part of the human workflow contract. Helper-reported `low_confidence` is an escalation signal for `Router` and `Gatekeeper`, not independent authority.
 - Helper-generated `proposed_destination` values are drafts. Agents may keep, refine, or reject them.
-- Low-confidence draft entries are non-routable by default: keep their evidence and candidates explicit until agent review resolves them.
-- Narrow deterministic fallback homes are allowed only after evidence extraction is exhausted and the agents explicitly approve them: `Screen-Captures` for unattributed screenshots/screencasts, plus `Recovery/Unknown-Text` and `Recovery/Unknown-Binary` for genuinely opaque leftovers.
+- Low-confidence draft entries are non-routable by default: keep their evidence and candidates explicit until reconciliation resolves them.
+- Narrow deterministic fallback homes are allowed only after evidence extraction is exhausted and the workflow still records them as blocked candidates: `Screen-Captures` for unattributed screenshots/screencasts, plus `Recovery/Unknown-Text` and `Recovery/Unknown-Binary` for genuinely opaque leftovers.
 
 ## The Banned Words List
 
@@ -200,7 +204,7 @@ Before you begin **any move**, enforce this gate. If any item fails, reroute tax
 
 7. **Gate outcome**
    - If any check is uncertain, route it back through `Scout`/`Router`/`Gatekeeper` refinement and rerun Step 5.5 until the gate passes.
-   - A helper reporting `low_confidence_count == 0` is useful evidence, but not sufficient by itself. Gatekeeper approval is the execution gate.
+   - `low_confidence_count == 0` plus empty `active_gate_failures` is the controller's ready-to-execute condition.
 
 ## Autonomy
 
@@ -210,7 +214,7 @@ Do not ask "should I proceed?" or "should I continue?" at intermediate steps.
 Report the final outcome when the workflow completes or a gate stops it.
 
 This workflow is autopilot-first at the human level: no human review cycle is required by default.
-Internal agent review is still required: `Scout`, `Router`, `Gatekeeper`, and `Supervisor` must adjudicate ambiguity before execution.
+Internal role handoffs still run: `Scout`, `Router`, `Gatekeeper`, and `Supervisor` must adjudicate ambiguity before execution, but they do so inside one run instead of through separate approval artifacts.
 When running `semantic_scan.py --manifest --autopilot`, the script may perform internal refinement loops and draft candidate homes, but helper convergence does not authorize moves by itself.
 
 ## Workflow Overview
@@ -370,19 +374,19 @@ cd /Users/tyemirov/Development/agentSkills/tidy-folder
 python3 ./scripts/run_tidy_folder.py <target-folder>
 ```
 
-The controller writes its draft manifest and handoff records into `./.tidy-folder-snapshots/<snapshot_id>/` inside the target folder, including `manifest.json`, `approved-actions.json`, `handoffs/00-supervisor.json`, and the per-phase handoff files for preflight, scout, router, gatekeeper, executor, and audit. When execution runs, it also writes a post-move audit manifest. These artifacts support the agent handoff protocol; they are not authoritative until the agents ratify them.
+The controller writes its draft manifest and handoff records into `./.tidy-folder-snapshots/<snapshot_id>/` inside the target folder, including `tree.txt`, `files.txt`, `file-metadata.tsv`, `manifest.json`, `draft-actions.json`, `handoffs/00-supervisor.json`, and the per-phase handoff files for preflight, scout, router, gatekeeper, executor, and audit. When execution runs, it also writes `move-ledger.json` plus a post-move audit manifest. Restore runs write `restore-report.json`. These artifacts are the run log and rollback contract.
 
 Build the manifest as an iterative artifact:
 - Round 1 may be helper-produced and must include: source path, proposed destination or candidate homes, evidence source list, and attribution source (`existing_taxonomy`, `filename`, `content`, `metadata`, `ocr`).
-- `Router` must convert helper evidence into agent-authored manifest decisions with explicit rationale.
-- If an entry is still low-confidence after agent review, keep `proposed_destination` empty or keep it explicitly blocked; do not auto-pretend the helper resolved it.
-- Use existing taxonomy as round seeds for scoring; then let agents reconcile helper proposals in passes.
-- Continue automatic refinement through the capped pass budget as needed, but execution stays blocked until `Gatekeeper` signs off on the agent-reviewed manifest.
+- `Router` must turn helper evidence into auditable destination decisions with explicit rationale in the router handoff.
+- If an entry is still low-confidence after reconciliation, keep `proposed_destination` empty or keep it explicitly blocked; do not auto-pretend the helper resolved it.
+- Use existing taxonomy as round seeds for scoring; then let the workflow reconcile helper proposals in passes.
+- Continue automatic refinement through the capped pass budget as needed, but execution stays blocked until the gatekeeper handoff is clear.
 
 Hard execution gate:
 - Re-run helper evidence passes after each reconciliation when they add value.
-- Execute moves only when `Gatekeeper` approves the agent-reviewed manifest and `Supervisor` authorizes execution.
-- Helper `low_confidence_count == 0` is helpful, but not sufficient by itself.
+- Execute moves only when the current run reports `low_confidence_count == 0` and `active_gate_failures == []`.
+- Snapshot inventory plus `move-ledger.json` and `--restore-snapshot <snapshot_id>` are the rollback mechanism.
 
 - For each candidate file/folder group, record:
   - Source path
@@ -401,7 +405,7 @@ Hard execution gate:
   - Any `low_confidence` destination
 - If there are blockers, iterate Step 5.5 automatically and repair the taxonomy before continuing.
 
-If the manifest is written and validated, proceed with move execution only when no blockers remain and `Gatekeeper` plus `Supervisor` have signed off on the agent-reviewed version.
+If the manifest is written and validated, proceed with move execution only when no blockers remain. Router and Gatekeeper handoffs are audit records, not separate approval checkpoints.
 
 ## Role-Based Orchestration Protocol
 
@@ -411,8 +415,9 @@ Use this protocol whenever you involve sub-agents in execution. This protocol is
 
 - Owns pass count, manifests, refinement iterations, and snapshot policy.
 - Creates and tracks `supervisor_handoff` records before each phase transition.
-- Never allows move actions without a green gate from Gatekeeper.
+- Never allows move actions while blockers remain.
 - Treats helper manifests, confidence scores, and fallback suggestions as advisory only.
+- Owns snapshot restoration through `--restore-snapshot <snapshot_id>`.
 
 ### Scout Agent
 
@@ -423,7 +428,7 @@ Use this protocol whenever you involve sub-agents in execution. This protocol is
 
 ### Router Agent
 
-- Converts scout evidence into agent-authored manifest entries.
+- Converts scout evidence into auditable manifest entries.
 - Builds proposals with:
   - deterministic destination,
   - tie-break rationale,
@@ -435,7 +440,7 @@ Use this protocol whenever you involve sub-agents in execution. This protocol is
 ### Gatekeeper Agent
 
 - Blocks execution on any of:
-  - helper-reported low confidence that remains unresolved after agent review,
+  - helper-reported low confidence that remains unresolved after reconciliation,
   - placement modes that are not high-confidence,
   - unresolved `needs_refinement` entries,
   - taxonomy gate failures (vague top-level intent, duplicate semantics, redundant nesting, project split violations, shallow depth violations, cross-domain tie-break errors).
@@ -449,9 +454,9 @@ Use this protocol whenever you involve sub-agents in execution. This protocol is
 
 ### Executor Agent
 
-- Applies only Supervisor-approved, Gatekeeper-cleared manifest actions.
+- Applies only current-run draft actions when the gatekeeper handoff is clear.
 - Performs idempotent, deterministic mv operations and canonical cleanup.
-- Never treats helper `approved-actions.json` as authority on its own.
+- Writes `move-ledger.json` for restore and audit instead of waiting on separate approval files.
 - Reports action deltas and any drift before handoff returns to Supervisor.
 
 Handoff requirements:
@@ -463,7 +468,7 @@ Handoff requirements:
 - `helper_findings`
 - `decision_rationale`
 - `active_gate_failures` (must be empty at execution time)
-- `approved_actions`
+- `draft_actions`
 
 Parallelism rule:
 - Do not run overlapping scan/execution cycles on the same directory.
@@ -481,7 +486,7 @@ This is an iterative cycle. Treat the taxonomy as a working hypothesis, then let
 - Reassign files from a broad parent into a new leaf when accumulated understanding makes that leaf the more specific and more searchable home.
 - Prefer repeated evidence or strong cross-file context over a one-off guess before creating a new leaf.
 - Re-run the audit against the new leafs so the earlier provisional placements can be corrected before anything is finalized.
-- Continue Step 5.5 cycles until `Gatekeeper` signs off that every entry is resolved or explicitly adjudicated.
+- Continue Step 5.5 cycles until the gatekeeper handoff is clear or the remaining entries stay explicitly blocked.
 - Keep each iteration recorded in the manifest as an explicit pass with the exact rationale for each file-level move so the cycle is auditable and deterministic.
 
 Examples of healthy refinement:
@@ -495,9 +500,9 @@ If later auditing reveals that a broad category should actually be split differe
 
 **Step 6: Move and rename**
 
-Use the validated, agent-approved placement manifest from Step 5 as the execution plan.
+Use the validated placement manifest from Step 5 as the execution plan.
 
-This step runs only when Step 5/5.5 has completed a fully validated, agent-reviewed manifest with no unresolved blockers.
+This step runs only when Step 5/5.5 has completed with no unresolved blockers.
 
 Execute the reorganization in a single logical pass per category, after the emerging taxonomy has been reviewed and refined. Key principles:
 
