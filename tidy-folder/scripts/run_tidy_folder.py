@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = []
+# ///
 from __future__ import annotations
 
 import argparse
@@ -29,7 +33,7 @@ DIRECT_EVIDENCE_PREFIXES = ("text:", "ocr:", "metadata:", "vision:")
 
 
 def resolve_uv_binary() -> str | None:
-    for candidate in (os.environ.get("UV"), "/opt/homebrew/bin/uv", shutil.which("uv")):
+    for candidate in (os.environ.get("UV"), shutil.which("uv")):
         if candidate and Path(candidate).exists():
             return candidate
     return None
@@ -131,7 +135,6 @@ def snapshot_inventory(
 def run_manifest(
     target: Path,
     *,
-    uv_binary: str,
     cache_file: Path | None,
     include_ignored: bool,
     vision: bool,
@@ -141,8 +144,6 @@ def run_manifest(
     heartbeat_interval_seconds: float = 30.0,
 ) -> dict[str, Any]:
     args = [
-        uv_binary,
-        "run",
         str(SCANNER),
         str(target),
         "--manifest",
@@ -1378,7 +1379,6 @@ def main() -> int:
 
         helper_manifest = run_manifest(
             target,
-            uv_binary=uv_binary,
             cache_file=cache_file,
             include_ignored=args.include_ignored,
             vision=args.vision,
@@ -1553,7 +1553,6 @@ def main() -> int:
         if executor_status == "executed":
             post_move_helper_manifest = run_manifest(
                 target,
-                uv_binary=uv_binary,
                 cache_file=cache_file,
                 include_ignored=args.include_ignored,
                 vision=args.vision,

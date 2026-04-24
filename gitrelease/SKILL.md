@@ -45,13 +45,13 @@ Report the final outcome when the workflow completes or a gate stops it.
 1. Run the deterministic preflight helper from the repository root:
    `release_timestamp="$(date +%Y-%m-%dT%H:%M:%S)"`
    `release_date="${release_timestamp%%T*}"`
-   `python3 /path/to/gitrelease/scripts/release_helper.py preflight --release-timestamp "$release_timestamp"`
+   `/path/to/gitrelease/scripts/release_helper.py preflight --release-timestamp "$release_timestamp"`
    Use its JSON output to set `default_branch`. If it exits nonzero, report the blocking facts and stop.
 2. Refresh the default branch locally:
    `gix cd "$default_branch"`
    This is the required branch switch and update step. Do not release from any other branch.
 3. Re-run preflight after the refresh:
-   `python3 /path/to/gitrelease/scripts/release_helper.py preflight --default-branch "$default_branch" --release-timestamp "$release_timestamp"`
+   `/path/to/gitrelease/scripts/release_helper.py preflight --default-branch "$default_branch" --release-timestamp "$release_timestamp"`
    Use this JSON output for `version_info`, `latest_tag`, and validation candidates. If it exits nonzero, report the blocking facts and stop.
 4. Run the repository's release validation:
    Prefer `make ci`.
@@ -70,7 +70,7 @@ Report the final outcome when the workflow completes or a gate stops it.
    Otherwise:
    `gix message changelog --version "$next_version" --release-date "$release_date" | tee "$release_notes_file"`
 7. Update `CHANGELOG.md` with the deterministic helper:
-   `python3 /path/to/gitrelease/scripts/release_helper.py insert-changelog --notes-file "$release_notes_file"`
+   `/path/to/gitrelease/scripts/release_helper.py insert-changelog --notes-file "$release_notes_file"`
    The helper creates `CHANGELOG.md` if needed and inserts the generated section near the top of the released versions section.
 8. Commit and push only the changelog update on the default branch:
    `git add CHANGELOG.md`
@@ -81,9 +81,9 @@ Report the final outcome when the workflow completes or a gate stops it.
 9. After the changelog commit is on the remote default branch, create and push the release tag:
    `gix release "$next_version"`
 10. Create or update the GitHub Release object with the helper. Do not assume a pushed tag is enough:
-   `python3 /path/to/gitrelease/scripts/release_helper.py publish-release --version "$next_version" --notes-file "$release_notes_file"`
+   `/path/to/gitrelease/scripts/release_helper.py publish-release --version "$next_version" --notes-file "$release_notes_file"`
 11. Run deterministic remote verification:
-   `python3 /path/to/gitrelease/scripts/release_helper.py verify-release --version "$next_version" --release-commit "$release_commit" --notes-file "$release_notes_file"`
+   `/path/to/gitrelease/scripts/release_helper.py verify-release --version "$next_version" --release-commit "$release_commit" --notes-file "$release_notes_file"`
    Add `--watch-run "$run_id"` for any release, package, documentation, or deployment workflow that the helper output shows should be watched to completion.
    Add `--expect-pages-text "$next_version"` or `--expect-pages-text "$release_commit"` when the GitHub Pages site exposes version, changelog, or build metadata at its root URL.
    If the helper exits nonzero, report the exact mismatch and stop. If it exits zero but shows repo-specific release/deployment runs that still need human judgment, inspect those runs and stop on any required release/deploy failure.
