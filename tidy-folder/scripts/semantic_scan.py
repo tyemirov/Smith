@@ -1036,7 +1036,7 @@ def tool_exists(name: str) -> bool:
 
 
 def resolve_uv_binary() -> str | None:
-    for candidate in (os.environ.get("UV"), "/opt/homebrew/bin/uv", shutil.which("uv")):
+    for candidate in (os.environ.get("UV"), shutil.which("uv")):
         if candidate and Path(candidate).exists():
             return candidate
     return None

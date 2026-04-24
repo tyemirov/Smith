@@ -39,3 +39,21 @@ Optional metadata files:
 - `agents/runtime.yaml`: subagent routing when a host supports explicit `model`
   and `reasoning_effort` controls. Routing files distinguish `fork-safe` steps
   from `same-worktree` steps so Git mutations stay in the live repository.
+
+## Python helpers
+
+Python helper scripts must be executable and use a `uv` script shebang:
+
+```python
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = []
+# ///
+```
+
+Declare script dependencies inline in the `dependencies` list. Skill workflows
+should invoke helpers directly, for example `./scripts/helper.py`, rather than
+through `python3`, `pip`, `pipx`, or a global virtual environment.
+`uv` should be available on `PATH`; scripts that need to re-exec through `uv`
+may also honor a `UV` environment variable.

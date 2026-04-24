@@ -1,4 +1,12 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "mutagen>=1.47",
+#   "openpyxl>=3.1",
+#   "Pillow>=10.0",
+# ]
+# ///
 from __future__ import annotations
 
 import base64

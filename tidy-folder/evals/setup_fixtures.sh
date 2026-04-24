@@ -5,11 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "=== Setting up eval fixtures ==="
-/opt/homebrew/bin/uv run \
-  --with openpyxl \
-  --with Pillow \
-  --with mutagen \
-  "$SCRIPT_DIR/fixture_builder.py"
+"$SCRIPT_DIR/fixture_builder.py"
 
 for fixture in \
   "$SCRIPT_DIR/fixtures/freelance-designer/test-folder" \
