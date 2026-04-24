@@ -1,11 +1,14 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = []
+# ///
 from __future__ import annotations
 
 import base64
 import json
 import shutil
 import subprocess
-import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,7 +18,6 @@ ROOT = Path(__file__).resolve().parent
 SCANNER = ROOT.parent / "scripts" / "semantic_scan.py"
 CONTROLLER = ROOT.parent / "scripts" / "run_tidy_folder.py"
 SETUP = ROOT / "setup_fixtures.sh"
-UV = Path("/opt/homebrew/bin/uv")
 BLANK_PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9p6k9n8AAAAASUVORK5CYII="
 )
@@ -27,7 +29,7 @@ def build_fixtures() -> None:
 
 def run_manifest(fixture: Path) -> dict:
     proc = subprocess.run(
-        [str(UV), "run", str(SCANNER), str(fixture), "--manifest", "--autopilot"],
+        [str(SCANNER), str(fixture), "--manifest", "--autopilot"],
         check=True,
         capture_output=True,
         text=True,
@@ -51,7 +53,7 @@ def seed_files(root: Path, files: dict[str, str]) -> None:
 
 def run_controller_command(root: Path, *extra_args: str, check: bool = True) -> tuple[subprocess.CompletedProcess[str], dict]:
     proc = subprocess.run(
-        [sys.executable, str(CONTROLLER), str(root), *extra_args],
+        [str(CONTROLLER), str(root), *extra_args],
         check=check,
         capture_output=True,
         text=True,
@@ -129,7 +131,7 @@ def main() -> int:
     build_fixtures()
 
     missing_target = subprocess.run(
-        [sys.executable, str(CONTROLLER)],
+        [str(CONTROLLER)],
         capture_output=True,
         text=True,
     )
@@ -345,7 +347,7 @@ def main() -> int:
         (root / "inbox/portfolio-summary.txt").write_text("portfolio positions brokerage balance\n", encoding="utf-8")
         first = json.loads(
             subprocess.run(
-                [sys.executable, str(CONTROLLER), str(root)],
+                [str(CONTROLLER), str(root)],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -353,7 +355,7 @@ def main() -> int:
         )
         second = json.loads(
             subprocess.run(
-                [sys.executable, str(CONTROLLER), str(root)],
+                [str(CONTROLLER), str(root)],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -369,8 +371,6 @@ def main() -> int:
         first = json.loads(
             subprocess.run(
                 [
-                    str(UV),
-                    "run",
                     str(SCANNER),
                     str(root),
                     "--manifest",
@@ -386,8 +386,6 @@ def main() -> int:
         second = json.loads(
             subprocess.run(
                 [
-                    str(UV),
-                    "run",
                     str(SCANNER),
                     str(root),
                     "--manifest",
@@ -405,8 +403,6 @@ def main() -> int:
         third = json.loads(
             subprocess.run(
                 [
-                    str(UV),
-                    "run",
                     str(SCANNER),
                     str(root),
                     "--manifest",
@@ -441,7 +437,7 @@ def main() -> int:
         }
         lock_path.write_text(json.dumps(fresh_lock, indent=2) + "\n", encoding="utf-8")
         proc = subprocess.run(
-            [sys.executable, str(CONTROLLER), str(root)],
+            [str(CONTROLLER), str(root)],
             capture_output=True,
             text=True,
         )
@@ -474,7 +470,7 @@ def main() -> int:
         }
         lock_path.write_text(json.dumps(stale_lock, indent=2) + "\n", encoding="utf-8")
         proc = subprocess.run(
-            [sys.executable, str(CONTROLLER), str(root), "--lease-seconds", "1"],
+            [str(CONTROLLER), str(root), "--lease-seconds", "1"],
             check=True,
             capture_output=True,
             text=True,
