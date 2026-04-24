@@ -1,4 +1,4 @@
 interface:
   display_name: "Git Release"
-  short_description: "Prepare and cut default-branch releases"
-  default_prompt: "Use $Git Release to verify release readiness, update CHANGELOG.md, choose the next semver tag, and publish the release."
+  short_description: "Prepare, publish, and verify releases"
+  default_prompt: "Use $Git Release to verify release readiness, update CHANGELOG.md, choose the next SemVer or CalVer tag, publish the tag and GitHub Release object, and verify release deployments such as GitHub Pages."
