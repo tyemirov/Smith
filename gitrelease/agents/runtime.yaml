@@ -23,8 +23,8 @@ steps:
     workspace: "fork-safe"
     model: "gpt-5.4-mini"
     reasoning_effort: "medium"
-    scope: "Choose the next semver version and explain the bump rationale from validated repository facts."
-    controller_handoff: "Pass validated facts only and keep the controller responsible for accepting or rejecting the proposed version."
+    scope: "Choose the release versioning scheme, either SemVer or CalVer, and explain the selected next tag from validated repository facts."
+    controller_handoff: "Pass validated facts only and keep the controller responsible for accepting or rejecting the proposed versioning scheme and tag."
 
   - id: "release-execution"
     agent_type: "worker"
@@ -32,5 +32,5 @@ steps:
     workspace: "same-worktree"
     model: "gpt-5.3-codex-spark"
     reasoning_effort: "medium"
-    scope: "Generate release notes with gix, update CHANGELOG.md, create the release commit, push it, and run gix release."
+    scope: "Use the bundled helper for deterministic changelog, GitHub Release, tag, Actions, and Pages checks; generate release notes with gix, create and push the release commit, and run gix release."
     controller_handoff: "If the host cannot guarantee same-worktree execution, run this step inline in the controller after the version is settled."

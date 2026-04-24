@@ -112,31 +112,32 @@ Use `scripts/run_tidy_folder.py` for the full workflow. It creates the rollback 
 ### Dependency and execution model
 
 - This skill must use `uv` for Python execution.
-- Do not install deps with `pip`, `pipx`, or global `venv` workflows for this script.
+- Python helpers are executable `uv run --script` files with inline dependencies.
+- Do not install deps with `pip`, `pipx`, or global `venv` workflows for these scripts.
 - For helper debugging only, you may inspect evidence directly with:
 
 ```bash
 cd /Users/tyemirov/Development/agentSkills/tidy-folder
-/opt/homebrew/bin/uv run ./scripts/semantic_scan.py /path/to/folder --manifest --autopilot
+./scripts/semantic_scan.py /path/to/folder --manifest --autopilot
 ```
 
 - For actual skill use, always start with the controller so the folder is snapshotted before any scan or move:
 
 ```bash
 cd /Users/tyemirov/Development/agentSkills/tidy-folder
-python3 ./scripts/run_tidy_folder.py /path/to/folder
-python3 ./scripts/run_tidy_folder.py /path/to/folder --execute
-python3 ./scripts/run_tidy_folder.py /path/to/folder --restore-snapshot <snapshot_id>
+./scripts/run_tidy_folder.py /path/to/folder
+./scripts/run_tidy_folder.py /path/to/folder --execute
+./scripts/run_tidy_folder.py /path/to/folder --restore-snapshot <snapshot_id>
 ```
 
 - Do not run the skill against an unspecified folder. If the user did not name a folder, ask for the folder first.
 
-- The script uses a lightweight `uv` shebang (`#!/usr/bin/env -S uv run --script`) and declares its baseline Python requirements inline, so ordinary non-vision scans do not pay the local vision-model install cost.
+- The scanner uses a lightweight `uv` shebang (`#!/usr/bin/env -S uv run --script`) and declares its baseline Python requirements inline, so ordinary non-vision scans do not pay the local vision-model install cost.
 - Vision mode is opt-in and explicit (recommended for images/videos):
 
 ```bash
-uv run ./scripts/semantic_scan.py /path/to/folder --manifest --autopilot --vision
-uv run ./scripts/semantic_scan.py /path/to/folder --manifest --autopilot --vision --vision-provider openai
+./scripts/semantic_scan.py /path/to/folder --manifest --autopilot --vision
+./scripts/semantic_scan.py /path/to/folder --manifest --autopilot --vision --vision-provider openai
 ```
 
 - Vision mode stays opt-in. When you request `--vision --vision-provider hf`, the script bootstraps the extra local `transformers`/`torch` runtime on demand through `uv`; use `--vision-provider openai` to route image/video understanding through an API model instead (requires `OPENAI_API_KEY`).
@@ -371,7 +372,7 @@ Before moves begin, create a draft placement manifest as the shared working arti
 
 ```bash
 cd /Users/tyemirov/Development/agentSkills/tidy-folder
-python3 ./scripts/run_tidy_folder.py <target-folder>
+./scripts/run_tidy_folder.py <target-folder>
 ```
 
 The controller writes its draft manifest and handoff records into `./.tidy-folder-snapshots/<snapshot_id>/` inside the target folder, including `tree.txt`, `files.txt`, `file-metadata.tsv`, `manifest.json`, `draft-actions.json`, `handoffs/00-supervisor.json`, and the per-phase handoff files for preflight, scout, router, gatekeeper, executor, and audit. When execution runs, it also writes `move-ledger.json` plus a post-move audit manifest. Restore runs write `restore-report.json`. These artifacts are the run log and rollback contract.
