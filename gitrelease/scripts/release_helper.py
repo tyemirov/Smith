@@ -21,11 +21,15 @@ from typing import Any
 
 SEMVER_TAG_RE = re.compile(r"^v?(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?$")
 CALVER_TAG_RE = re.compile(
+    r"^v?(?P<year>\d{4})\.(?P<month>\d{1,2})\.(?P<day>\d{1,2})\.(?P<minutes>\d{1,4})$"
+)
+# Older releases used YYYY.M.D.H[.m[.s]]; keep recognizing them for ordering.
+LEGACY_CALVER_TAG_RE = re.compile(
     r"^v?(?P<year>\d{4})\.(?P<month>\d{1,2})\.(?P<day>\d{1,2})"
     r"(?:\.(?P<hour>\d{1,2})(?:\.(?P<minute>\d{1,2})(?:\.(?P<second>\d{1,2}))?)?)?$"
 )
 RELEASE_HEADING_RE = re.compile(
-    r"^##\s+\[?(?:v?(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?|v?\d{4}\.\d{1,2}\.\d{1,2}(?:\.\d{1,2}(?:\.\d{1,2}(?:\.\d{1,2})?)?)?)\]?(?:[^\n]*)?$",
+    r"^##\s+\[?(?:v?(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?|v?\d{4}\.\d{1,2}\.\d{1,2}(?:\.\d{1,4}(?:\.\d{1,2}(?:\.\d{1,2})?)?)?)\]?(?:[^\n]*)?$",
     re.MULTILINE,
 )
 
@@ -109,6 +113,19 @@ def calver_match(tag: str) -> re.Match[str] | None:
         dt.date(int(match.group("year")), int(match.group("month")), int(match.group("day")))
     except ValueError:
         return None
+    if not 0 <= int(match.group("minutes")) <= 1439:
+        return None
+    return match
+
+
+def legacy_calver_match(tag: str) -> re.Match[str] | None:
+    match = LEGACY_CALVER_TAG_RE.match(tag)
+    if not match:
+        return None
+    try:
+        dt.date(int(match.group("year")), int(match.group("month")), int(match.group("day")))
+    except ValueError:
+        return None
     for name, upper in (("hour", 23), ("minute", 59), ("second", 59)):
         value = match.group(name)
         if value is not None and not 0 <= int(value) <= upper:
@@ -117,7 +134,7 @@ def calver_match(tag: str) -> re.Match[str] | None:
 
 
 def tag_scheme(tag: str) -> str | None:
-    if calver_match(tag):
+    if calver_match(tag) or legacy_calver_match(tag):
         return "calver"
     if SEMVER_TAG_RE.match(tag):
         return "semver"
@@ -149,64 +166,60 @@ def parse_release_date(value: str) -> dt.date:
         raise HelperError("release date must use YYYY-MM-DD format", {"release_date": value}) from exc
 
 
-def calver_sort_key(tag: str) -> tuple[int, int, int, int, int, int]:
+def calver_sort_key(tag: str) -> tuple[int, int, int, int, int]:
     match = calver_match(tag)
+    if match:
+        return (
+            int(match.group("year")),
+            int(match.group("month")),
+            int(match.group("day")),
+            int(match.group("minutes")),
+            -1,
+        )
+
+    match = legacy_calver_match(tag)
     if not match:
         raise ValueError(f"not a CalVer tag: {tag}")
+    hour = int(match.group("hour")) if match.group("hour") is not None else 0
+    minute = int(match.group("minute")) if match.group("minute") is not None else 0
+    second = int(match.group("second")) if match.group("second") is not None else -1
     return (
         int(match.group("year")),
         int(match.group("month")),
         int(match.group("day")),
-        int(match.group("hour")) if match.group("hour") is not None else -1,
-        int(match.group("minute")) if match.group("minute") is not None else -1,
-        int(match.group("second")) if match.group("second") is not None else -1,
+        (hour * 60) + minute,
+        second,
     )
 
 
-def calver_from_timestamp(timestamp: dt.datetime, precision: str) -> str:
-    parts = [timestamp.year, timestamp.month, timestamp.day]
-    if precision in {"hour", "minute", "second"}:
-        parts.append(timestamp.hour)
-    if precision in {"minute", "second"}:
-        parts.append(timestamp.minute)
-    if precision == "second":
-        parts.append(timestamp.second)
+def calver_minutes(timestamp: dt.datetime) -> int:
+    return (timestamp.hour * 60) + timestamp.minute
+
+
+def calver_from_timestamp(timestamp: dt.datetime) -> str:
+    parts = [timestamp.year, timestamp.month, timestamp.day, calver_minutes(timestamp)]
     return ".".join(str(part) for part in parts)
 
 
 def calver_candidate(tags: list[str], release_timestamp: dt.datetime) -> dict[str, Any]:
     existing = set(tags)
-    all_candidates = [
-        ("hour", calver_from_timestamp(release_timestamp, "hour")),
-        ("minute", calver_from_timestamp(release_timestamp, "minute")),
-        ("second", calver_from_timestamp(release_timestamp, "second")),
-    ]
-    minimum_precision = "second" if release_timestamp.second else "minute" if release_timestamp.minute else "hour"
-    minimum_index = next(index for index, (precision, _) in enumerate(all_candidates) if precision == minimum_precision)
-    candidates = all_candidates[minimum_index:]
-    chosen_precision, chosen = candidates[-1]
-    collision_chain: list[str] = []
-    for precision, candidate in candidates:
-        if candidate in existing or f"v{candidate}" in existing:
-            collision_chain.append(candidate)
-            continue
-        chosen_precision, chosen = precision, candidate
-        break
-
+    chosen = calver_from_timestamp(release_timestamp)
+    collision_chain = [chosen] if chosen in existing or f"v{chosen}" in existing else []
     calver_tags = [tag for tag in tags if tag_scheme(tag) == "calver"]
     latest_calver = sorted(calver_tags, key=calver_sort_key, reverse=True)[0] if calver_tags else None
     candidate_key = calver_sort_key(chosen)
     latest_key = calver_sort_key(latest_calver) if latest_calver else None
     errors: list[str] = []
     if chosen in existing or f"v{chosen}" in existing:
-        errors.append("CalVer timestamp candidate already exists at second precision")
+        errors.append("CalVer minute candidate already exists")
     if latest_key and candidate_key <= latest_key:
-        errors.append("CalVer timestamp is not later than the latest CalVer tag")
+        errors.append("CalVer minute is not later than the latest CalVer tag")
 
     return {
         "ok": not errors,
         "candidate": chosen,
-        "precision": chosen_precision,
+        "precision": "minute",
+        "minutes": calver_minutes(release_timestamp),
         "release_timestamp": release_timestamp.isoformat(),
         "latest_calver_tag": latest_calver,
         "collision_chain": collision_chain,
@@ -249,7 +262,7 @@ def version_info(cwd: Path, release_timestamp: dt.datetime) -> dict[str, Any]:
         "calver_candidate": calver,
         "release_date": release_timestamp.date().isoformat(),
         "release_timestamp": release_timestamp.isoformat(),
-        "calver_format": "YYYY.M.D.H[.m[.s]]",
+        "calver_format": "YYYY.M.D.minutes",
     }
 
 
@@ -658,7 +671,7 @@ def build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--release-date", help="Release date in YYYY-MM-DD format. Used as midnight if no timestamp is provided.")
     preflight.add_argument(
         "--release-timestamp",
-        help="Release timestamp in ISO format for CalVer candidate generation, for example 2026-04-23T17:05:12.",
+        help="Release timestamp in ISO format for CalVer candidate generation, for example 2026-04-23T17:05:12 -> 2026.4.23.1025.",
     )
     preflight.set_defaults(func=command_preflight)
 

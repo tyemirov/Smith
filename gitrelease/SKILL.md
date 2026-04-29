@@ -94,9 +94,9 @@ Report the final outcome when the workflow completes or a gate stops it.
 
 Release tags may use SemVer or CalVer.
 
-- CalVer means calendar versioning. The default CalVer tag format is timestamp-derived: `YYYY.M.D.H[.m[.s]]`. For example, a release at 17:00 on April 23, 2026 is `2026.4.23.17`; a release at 17:05 is `2026.4.23.17.5`.
-- CalVer must match the release timestamp and increase with time. Do not use an arbitrary same-day sequence counter.
-- The helper starts with hour precision, then uses minute or second precision only when needed to avoid colliding with an existing timestamp tag. If the timestamp is not later than the latest CalVer tag, stop and report the clock/order issue.
+- CalVer means calendar versioning. The default CalVer tag format is timestamp-derived: `YYYY.M.D.minutes`, where `minutes` is the number of minutes since release-day midnight. For example, a release at 00:15:59 on April 27, 2026 is `2026.4.27.15`; a release at 17:05 on April 23, 2026 is `2026.4.23.1025`.
+- CalVer must match the release timestamp's date and minute, and increase with time. Do not use an arbitrary same-day sequence counter.
+- The helper always emits minute-of-day precision and ignores seconds. If a tag for the same minute already exists, or if the timestamp is not later than the latest CalVer tag, stop and report the clock/order issue rather than adding seconds or a sequence suffix.
 - Prefer CalVer for applications, sites, internal tools, skills, documentation projects, and repositories where release identity matters more than compatibility signaling.
 - Prefer SemVer for libraries, CLIs, packages, APIs, plugins, or other artifacts consumed by downstream users who reasonably expect SemVer compatibility guarantees.
 - If the repository has an explicit versioning policy, follow it.
