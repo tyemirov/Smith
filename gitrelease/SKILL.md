@@ -90,13 +90,27 @@ Report the final outcome when the workflow completes or a gate stops it.
 12. Refresh tags after remote verification:
    `git fetch --tags origin`
 
+## Deployment Surface Verification
+
+Local validation and production deployment verification are separate gates. A localhost smoke test proves only the local topology it runs against. It does not prove production DNS, TLS, reverse-proxy routing, static hosting, CORS, cookies, OAuth callback URLs, or split-origin browser behavior.
+
+Before treating a release as production-verified, identify each deployment surface from repo docs, workflows, Pages config, gateway config, and product URLs:
+
+- static frontend surface, such as GitHub Pages
+- backend/API surface, such as a Caddy-routed host or container service
+- auth provider callback surface
+- CDN or cache surface, when present
+- package/image surface, such as GHCR
+
+For split-origin apps, verify both configured origins. A Pages frontend being live does not prove `/api` or `/auth`; an API health check does not prove browser cookies, CORS, or OAuth redirects. When the release touches auth, API routing, frontend request paths, deployment config, or public URLs, probe the real production hostnames and classify failures by surface instead of generalizing from localhost.
+
 ## Versioning
 
 Release tags may use SemVer or CalVer.
 
-- CalVer means calendar versioning. The default CalVer tag format is timestamp-derived: `YYYY.M.D.minutes`, where `minutes` is the number of minutes since release-day midnight. For example, a release at 00:15:59 on April 27, 2026 is `2026.4.27.15`; a release at 17:05 on April 23, 2026 is `2026.4.23.1025`.
-- CalVer must match the release timestamp's date and minute, and increase with time. Do not use an arbitrary same-day sequence counter.
-- The helper always emits minute-of-day precision and ignores seconds. If a tag for the same minute already exists, or if the timestamp is not later than the latest CalVer tag, stop and report the clock/order issue rather than adding seconds or a sequence suffix.
+- CalVer means calendar versioning. The default CalVer tag format is SemVer-shaped and timestamp-derived: `YY.MDD.HHMMSS`. Use the last two digits of the year for `YY`, `month * 100 + day` for `MDD`, and `hour * 10000 + minute * 100 + second` for `HHMMSS`. For example, a release at 06:17:41 on April 29, 2026 is `26.429.61741`; a release at 17:05:12 on April 23, 2026 is `26.423.170512`.
+- CalVer must match the release timestamp's date and second, and increase with time. Do not use an arbitrary same-day sequence counter.
+- The helper emits second precision. If a tag for the same second already exists, or if the timestamp is not later than the latest CalVer tag, stop and report the clock/order issue rather than adding a sequence suffix.
 - Prefer CalVer for applications, sites, internal tools, skills, documentation projects, and repositories where release identity matters more than compatibility signaling.
 - Prefer SemVer for libraries, CLIs, packages, APIs, plugins, or other artifacts consumed by downstream users who reasonably expect SemVer compatibility guarantees.
 - If the repository has an explicit versioning policy, follow it.
@@ -131,6 +145,8 @@ Report:
 - GitHub Release object URL and verification result
 - release/deployment workflow results
 - GitHub Pages status and URL when configured
+- backend/API status and URL when configured
+- whether the production frontend and backend are same-origin or split-origin when auth/API behavior is involved
 - final worktree cleanliness
 
 If the process stops early, report the exact blocking step and the command outcome that caused the stop.
@@ -145,5 +161,8 @@ If the process stops early, report the exact blocking step and the command outco
 - Never treat a pushed tag as equivalent to a published GitHub Release object.
 - Never finish a release without re-reading GitHub's remote state for the tag and release object.
 - Never ignore a configured GitHub Pages site or release deployment surface.
-- Never imply SemVer compatibility guarantees for a CalVer release.
-- Never increment a CalVer suffix independently of the release timestamp.
+- Never use localhost-only tests as evidence that production deployment works.
+- Never assume a production app is same-origin just because the local stack is same-origin.
+- Never treat static frontend verification as backend/API verification, or backend/API verification as browser auth verification.
+- Never imply SemVer compatibility guarantees for a CalVer release, even when the tag is SemVer-shaped for tooling compatibility.
+- Never increment a CalVer timestamp component independently of the release timestamp.
