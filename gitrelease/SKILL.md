@@ -48,8 +48,8 @@ Report the final outcome when the workflow completes or a gate stops it.
    `/path/to/gitrelease/scripts/release_helper.py preflight --release-timestamp "$release_timestamp"`
    Use its JSON output to set `default_branch`. If it exits nonzero, report the blocking facts and stop.
 2. Refresh the default branch locally:
-   `gix cd "$default_branch"`
-   This is the required branch switch and update step. Do not release from any other branch.
+   `gix sync`
+   This is the required local refresh step. Do not release from any branch other than `default_branch`.
 3. Re-run preflight after the refresh:
    `/path/to/gitrelease/scripts/release_helper.py preflight --default-branch "$default_branch" --release-timestamp "$release_timestamp"`
    Use this JSON output for `version_info`, `latest_tag`, and validation candidates. If it exits nonzero, report the blocking facts and stop.

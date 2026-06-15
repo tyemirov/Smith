@@ -4,11 +4,29 @@ Custom skills for Codex and Claude Code.
 
 ## Installation
 
+### Codex plugins
+
+```bash
+./install-plugins.sh
+```
+
+This syncs the four skills into separate personal Codex plugins under
+`~/plugins/`, updates `~/.agents/plugins/marketplace.json`, installs them with
+`codex plugin add`, and removes old direct Codex skill symlinks that point back
+to this repository.
+
+Use `./install-plugins.sh --help` for options such as `--plugin-parent`,
+`--marketplace-path`, `--dry-run`, `--no-install`, and
+`--keep-direct-skills`.
+
+### Direct skill symlinks
+
 ```bash
 ./install-skills.sh
 ```
 
-This installs skills into both platforms from a single source:
+This legacy installer links skills directly into Codex and Claude Code from a
+single source:
 
 - **Codex**: symlinks each skill directory into `~/.codex/skills/`
 - **Claude Code**: symlinks each `SKILL.md` into `~/.claude/commands/` as a
