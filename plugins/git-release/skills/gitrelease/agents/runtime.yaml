@@ -1,0 +1,36 @@
+version: 1
+
+controller:
+  execution: "inherit"
+  responsibilities:
+    - "Own user communication, live-worktree verification, and final reporting."
+    - "Use workers for bounded planning or execution only when the host can satisfy each step's workspace requirement."
+    - "Do not allow a worker to guess missing release inputs."
+
+steps:
+  - id: "release-preflight"
+    agent_type: "worker"
+    use_subagent_when_available: true
+    workspace: "fork-safe"
+    model: "gpt-5.3-codex-spark"
+    reasoning_effort: "low"
+    scope: "Resolve the default branch, inspect open PRs, confirm worktree cleanliness, identify the release validation command, and find the latest version tag."
+    controller_handoff: "Verify blocking facts in the live worktree before continuing to release side effects."
+
+  - id: "release-versioning"
+    agent_type: "worker"
+    use_subagent_when_available: true
+    workspace: "fork-safe"
+    model: "gpt-5.4-mini"
+    reasoning_effort: "medium"
+    scope: "Choose the release versioning scheme, either SemVer or CalVer, and explain the selected next tag from validated repository facts."
+    controller_handoff: "Pass validated facts only and keep the controller responsible for accepting or rejecting the proposed versioning scheme and tag."
+
+  - id: "release-execution"
+    agent_type: "worker"
+    use_subagent_when_available: true
+    workspace: "same-worktree"
+    model: "gpt-5.3-codex-spark"
+    reasoning_effort: "medium"
+    scope: "Use the bundled helper for deterministic changelog, GitHub Release, tag, Actions, and Pages checks; generate release notes with gix, create and push the release commit, and run gix release."
+    controller_handoff: "If the host cannot guarantee same-worktree execution, run this step inline in the controller after the version is settled."

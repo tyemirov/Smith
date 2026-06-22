@@ -2,24 +2,57 @@
 
 Custom skills for Codex and Claude Code.
 
-## Installation
+## Codex Plugin Marketplace
 
-### Codex plugins
+This repository is a Codex plugin marketplace. GitHub discoverability comes
+from the checked-in marketplace and plugin package layout:
+
+- `./.agents/plugins/marketplace.json`
+- `./plugins/email-cleanup`
+- `./plugins/git-commit`
+- `./plugins/git-release`
+- `./plugins/tidy-folder`
+
+After this repository is published, install the marketplace from GitHub:
 
 ```bash
-./install-plugins.sh
+codex plugin marketplace add tyemirov/Smith --ref master
+codex plugin add email-cleanup@agent-skills
+codex plugin add git-commit@agent-skills
+codex plugin add git-release@agent-skills
+codex plugin add tidy-folder@agent-skills
 ```
 
-This syncs the four skills into separate personal Codex plugins under
-`~/plugins/`, updates `~/.agents/plugins/marketplace.json`, installs them with
-`codex plugin add`, and removes old direct Codex skill symlinks that point back
-to this repository.
+## Local Development
 
-Use `./install-plugins.sh --help` for options such as `--plugin-parent`,
-`--marketplace-path`, `--dry-run`, `--no-install`, and
-`--keep-direct-skills`.
+Regenerate the checked-in plugin packages from the source skill directories:
 
-### Direct skill symlinks
+```bash
+./sync-plugins.sh
+```
+
+By default, this only updates repository files under `./plugins/` and
+`./.agents/plugins/marketplace.json`. It does not register or install anything
+in the local Codex configuration.
+
+Use `./sync-plugins.sh --help` for options such as `--plugin-parent`,
+`--marketplace-path`, `--marketplace-name`, and `--dry-run`.
+
+For local smoke testing only, register this checkout as a local marketplace and
+install the plugins:
+
+```bash
+./sync-plugins.sh --install-local
+```
+
+To remove legacy direct Codex skill symlinks that point back to this repository
+during local cleanup:
+
+```bash
+./sync-plugins.sh --remove-direct-skills
+```
+
+### Legacy Direct Skill Symlinks
 
 ```bash
 ./install-skills.sh

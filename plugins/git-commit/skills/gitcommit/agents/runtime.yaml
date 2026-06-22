@@ -1,0 +1,26 @@
+version: 1
+
+controller:
+  execution: "inherit"
+  responsibilities:
+    - "Own user communication, live-worktree verification, and final reporting."
+    - "Execute any step inline when subagents are unavailable or the host cannot satisfy that step's workspace requirement."
+
+steps:
+  - id: "commit-preflight"
+    agent_type: "worker"
+    use_subagent_when_available: true
+    workspace: "fork-safe"
+    model: "gpt-5.3-codex-spark"
+    reasoning_effort: "low"
+    scope: "Inspect repository state, detect stop conditions, and summarize the next safe action before any mutation."
+    controller_handoff: "Re-run or verify the critical repository facts in the live worktree before staging or committing."
+
+  - id: "commit-execution"
+    agent_type: "worker"
+    use_subagent_when_available: true
+    workspace: "same-worktree"
+    model: "gpt-5.3-codex-spark"
+    reasoning_effort: "low"
+    scope: "Stage the full tree, draft the commit message with gix from the staged diff, commit, and push only when the remote target is unambiguous."
+    controller_handoff: "If the host cannot guarantee same-worktree execution, do this step inline in the controller."

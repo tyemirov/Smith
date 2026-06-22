@@ -1,0 +1,23 @@
+{
+  "name": "email-cleanup",
+  "version": "0.1.0",
+  "description": "Policy-driven Gmail cleanup workflow for Codex.",
+  "author": {
+    "name": "Smith"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Email Cleanup",
+    "shortDescription": "Run policy-driven Gmail cleanup at scale",
+    "longDescription": "Email Cleanup audits crowded Gmail accounts, protects durable mail, builds conservative bulk-cleanup policies, and uses Gmail connector tools when available.",
+    "developerName": "Smith",
+    "category": "Communication",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use Email Cleanup to audit and clean Gmail safely."
+    ]
+  }
+}
