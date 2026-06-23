@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tidy Folder"
+  short_description: "Snapshot-first folder reorganization for an explicit target folder"
+  default_prompt: "Use $Tidy Folder on the provided folder only: create a snapshot and active run lock first, use helper scripts only to gather evidence and draft artifacts, apply explicit evidence-precedence rules, execute only when the current run is clear, and preserve restore capability via the snapshot ledger."

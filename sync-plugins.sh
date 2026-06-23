@@ -3,33 +3,39 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-plugin_parent="${PLUGIN_PARENT:-$HOME/plugins}"
-marketplace_path="${MARKETPLACE_PATH:-$HOME/.agents/plugins/marketplace.json}"
+plugin_parent="${PLUGIN_PARENT:-$repo_root/plugins}"
+marketplace_path="${MARKETPLACE_PATH:-$repo_root/.agents/plugins/marketplace.json}"
+marketplace_name="${MARKETPLACE_NAME:-agent-skills}"
+marketplace_display_name="${MARKETPLACE_DISPLAY_NAME:-Agent Skills}"
 codex_home="${CODEX_HOME:-$HOME/.codex}"
 codex_skills_dir="$codex_home/skills"
 python_cmd="${PYTHON:-python3}"
 dry_run=0
-install_plugins=1
-remove_direct_skills=1
+install_local=0
+remove_direct_skills=0
 
 usage() {
   cat <<'EOF'
-Usage: install-plugins.sh [--plugin-parent PATH] [--marketplace-path PATH] [--codex-home PATH] [--dry-run] [--no-install] [--keep-direct-skills]
+Usage: sync-plugins.sh [--plugin-parent PATH] [--marketplace-path PATH] [--marketplace-name NAME] [--marketplace-display-name NAME] [--codex-home PATH] [--dry-run] [--install-local] [--remove-direct-skills]
 
-Sync this repository's skills into four separate Codex personal plugins.
+Regenerate this repository's checked-in Codex plugin packages and marketplace.
 
 Defaults:
-  plugin parent:      ~/plugins
-  marketplace JSON:   ~/.agents/plugins/marketplace.json
+  plugin parent:      ./plugins
+  marketplace JSON:   ./.agents/plugins/marketplace.json
+  marketplace name:   agent-skills
   Codex home:         $CODEX_HOME or ~/.codex
 
 Options:
   --plugin-parent PATH      Parent directory for plugin packages.
   --marketplace-path PATH   Marketplace JSON to create or update.
+  --marketplace-name NAME   Marketplace identifier written to marketplace.json.
+  --marketplace-display-name NAME
+                            Marketplace display name written to marketplace.json.
   --codex-home PATH         Codex home used when removing old direct skill links.
   --dry-run                 Show planned filesystem and Codex operations.
-  --no-install              Sync plugin packages and marketplace, but skip codex plugin add.
-  --keep-direct-skills      Do not remove old ~/.codex/skills symlinks.
+  --install-local           Register this local checkout as a marketplace and install plugins.
+  --remove-direct-skills    Remove old ~/.codex/skills symlinks that point at this repo.
   -h, --help                Show this help.
 EOF
 }
@@ -88,6 +94,22 @@ while [[ $# -gt 0 ]]; do
       marketplace_path="$2"
       shift 2
       ;;
+    --marketplace-name)
+      if [[ $# -lt 2 ]]; then
+        log "Missing value for --marketplace-name"
+        exit 1
+      fi
+      marketplace_name="$2"
+      shift 2
+      ;;
+    --marketplace-display-name)
+      if [[ $# -lt 2 ]]; then
+        log "Missing value for --marketplace-display-name"
+        exit 1
+      fi
+      marketplace_display_name="$2"
+      shift 2
+      ;;
     --codex-home)
       if [[ $# -lt 2 ]]; then
         log "Missing value for --codex-home"
@@ -101,12 +123,12 @@ while [[ $# -gt 0 ]]; do
       dry_run=1
       shift
       ;;
-    --no-install)
-      install_plugins=0
+    --install-local)
+      install_local=1
       shift
       ;;
-    --keep-direct-skills)
-      remove_direct_skills=0
+    --remove-direct-skills)
+      remove_direct_skills=1
       shift
       ;;
     -h|--help)
@@ -134,6 +156,7 @@ plugin_names=()
 log "Repo root: $repo_root"
 log "Plugin parent: $plugin_parent"
 log "Marketplace: $marketplace_path"
+log "Marketplace name: $marketplace_name"
 
 while IFS='|' read -r plugin_name skill_dir display_name category description short_description long_description default_prompt; do
   [[ -z "$plugin_name" ]] && continue
@@ -158,6 +181,9 @@ while IFS='|' read -r plugin_name skill_dir display_name category description sh
   else
     rm -rf "$skill_target"
     cp -a "$source_dir" "$skill_parent/"
+    find "$skill_target" -type d -name __pycache__ -prune -exec rm -rf {} +
+    find "$skill_target" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+    rm -rf "$skill_target/evals/fixtures"
     "$python_cmd" - "$manifest_path" "$plugin_name" "$display_name" "$category" "$description" "$short_description" "$long_description" "$default_prompt" <<'PY'
 import json
 import sys
@@ -207,29 +233,29 @@ PY
   if [[ "$dry_run" -eq 1 ]]; then
     log "[dry-run] add or replace marketplace entry for $plugin_name"
   else
-    "$python_cmd" - "$marketplace_path" "$plugin_name" "$category" <<'PY'
+    "$python_cmd" - "$marketplace_path" "$marketplace_name" "$marketplace_display_name" "$plugin_name" "$category" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-marketplace_path, plugin_name, category = sys.argv[1:]
+marketplace_path, marketplace_name, marketplace_display_name, plugin_name, category = sys.argv[1:]
 path = Path(marketplace_path).expanduser()
 
 if path.exists():
     payload = json.loads(path.read_text(encoding="utf-8"))
 else:
     payload = {
-        "name": "personal",
+        "name": marketplace_name,
         "interface": {
-            "displayName": "Personal",
+            "displayName": marketplace_display_name,
         },
         "plugins": [],
     }
 
-payload.setdefault("name", "personal")
+payload["name"] = marketplace_name
 interface = payload.setdefault("interface", {})
 if isinstance(interface, dict):
-    interface.setdefault("displayName", "Personal")
+    interface["displayName"] = marketplace_display_name
 plugins = payload.setdefault("plugins", [])
 if not isinstance(plugins, list):
     raise SystemExit(f"{path} field 'plugins' must be an array")
@@ -283,9 +309,9 @@ if [[ "$remove_direct_skills" -eq 1 ]]; then
   done <<< "$plugin_specs"
 fi
 
-if [[ "$install_plugins" -eq 1 ]]; then
+if [[ "$install_local" -eq 1 ]]; then
   if [[ "$dry_run" -eq 1 ]]; then
-    log "[dry-run] install plugins with codex plugin add <plugin>@<marketplace>"
+    log "[dry-run] register marketplace root and install plugins with codex plugin add <plugin>@<marketplace>"
   else
     marketplace_name="$("$python_cmd" - "$marketplace_path" <<'PY'
 import json
@@ -297,6 +323,11 @@ payload = json.loads(path.read_text(encoding="utf-8"))
 print(payload["name"])
 PY
 )"
+    marketplace_dir="$(cd -- "$(dirname -- "$marketplace_path")" && pwd)"
+    marketplace_root="$(cd -- "$marketplace_dir/../.." && pwd)"
+    if ! codex plugin marketplace list | awk '{print $1}' | grep -Fxq "$marketplace_name"; then
+      run codex plugin marketplace add "$marketplace_root"
+    fi
     for plugin_name in "${plugin_names[@]}"; do
       run codex plugin add "$plugin_name@$marketplace_name"
     done
