@@ -7,6 +7,9 @@ plugin_parent="${PLUGIN_PARENT:-$repo_root/plugins}"
 marketplace_path="${MARKETPLACE_PATH:-$repo_root/.agents/plugins/marketplace.json}"
 marketplace_name="${MARKETPLACE_NAME:-agent-skills}"
 marketplace_display_name="${MARKETPLACE_DISPLAY_NAME:-Agent Skills}"
+plugin_name="${PLUGIN_NAME:-tyemirov}"
+plugin_display_name="${PLUGIN_DISPLAY_NAME:-Tyemirov}"
+plugin_category="${PLUGIN_CATEGORY:-Productivity}"
 codex_home="${CODEX_HOME:-$HOME/.codex}"
 codex_skills_dir="$codex_home/skills"
 python_cmd="${PYTHON:-python3}"
@@ -16,18 +19,22 @@ remove_direct_skills=0
 
 usage() {
   cat <<'EOF'
-Usage: sync-plugins.sh [--plugin-parent PATH] [--marketplace-path PATH] [--marketplace-name NAME] [--marketplace-display-name NAME] [--codex-home PATH] [--dry-run] [--install-local] [--remove-direct-skills]
+Usage: sync-plugins.sh [--plugin-parent PATH] [--plugin-name NAME] [--plugin-display-name NAME] [--marketplace-path PATH] [--marketplace-name NAME] [--marketplace-display-name NAME] [--codex-home PATH] [--dry-run] [--install-local] [--remove-direct-skills]
 
-Regenerate this repository's checked-in Codex plugin packages and marketplace.
+Regenerate this repository's checked-in Codex plugin bundle and marketplace.
 
 Defaults:
   plugin parent:      ./plugins
+  plugin name:        tyemirov
   marketplace JSON:   ./.agents/plugins/marketplace.json
   marketplace name:   agent-skills
   Codex home:         $CODEX_HOME or ~/.codex
 
 Options:
   --plugin-parent PATH      Parent directory for plugin packages.
+  --plugin-name NAME        Plugin identifier and namespace prefix.
+  --plugin-display-name NAME
+                            Plugin display name written to plugin.json.
   --marketplace-path PATH   Marketplace JSON to create or update.
   --marketplace-name NAME   Marketplace identifier written to marketplace.json.
   --marketplace-display-name NAME
@@ -84,6 +91,22 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       plugin_parent="$2"
+      shift 2
+      ;;
+    --plugin-name)
+      if [[ $# -lt 2 ]]; then
+        log "Missing value for --plugin-name"
+        exit 1
+      fi
+      plugin_name="$2"
+      shift 2
+      ;;
+    --plugin-display-name)
+      if [[ $# -lt 2 ]]; then
+        log "Missing value for --plugin-display-name"
+        exit 1
+      fi
+      plugin_display_name="$2"
       shift 2
       ;;
     --marketplace-path)
@@ -143,83 +166,109 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-plugin_specs="$(cat <<'EOF'
-email-cleanup|email-cleanup|Email Cleanup|Communication|Policy-driven Gmail cleanup workflow for Codex.|Run policy-driven Gmail cleanup at scale|Email Cleanup audits crowded Gmail accounts, protects durable mail, builds conservative bulk-cleanup policies, and uses Gmail connector tools when available.|Use Email Cleanup to audit and clean Gmail safely.
-git-commit|gitcommit|Git Commit|Developer Tools|Diff-aware Git commit workflow for Codex.|Draft, commit, and push Git changes|Git Commit inspects the current worktree, stages changes, drafts a commit message with gix, commits all tracked and untracked work, and pushes when the remote target is clear.|Use Git Commit to commit and push current changes.
-git-release|gitrelease|Git Release|Developer Tools|Repository release workflow for Codex.|Prepare, publish, and verify releases|Git Release prepares releases from the default branch, checks release readiness, updates changelogs, publishes tags and GitHub Releases, and verifies configured release surfaces.|Use Git Release to prepare and publish a repo release.
-tidy-folder|tidy-folder|Tidy Folder|Productivity|Snapshot-first folder organization workflow for Codex.|Snapshot-first organization for explicit folders|Tidy Folder reorganizes explicitly provided folders by meaning rather than file type, preserves rollback snapshots, records move ledgers, and verifies the final tree.|Use Tidy Folder to reorganize a specified folder safely.
+skill_specs="$(cat <<'EOF'
+email-cleanup
+gitcommit
+gitrelease
+tidy-folder
 EOF
 )"
 
-plugin_names=()
+legacy_plugin_names=(email-cleanup git-commit git-release tidy-folder)
 
 log "Repo root: $repo_root"
 log "Plugin parent: $plugin_parent"
+log "Plugin: $plugin_name"
 log "Marketplace: $marketplace_path"
 log "Marketplace name: $marketplace_name"
 
-while IFS='|' read -r plugin_name skill_dir display_name category description short_description long_description default_prompt; do
-  [[ -z "$plugin_name" ]] && continue
+if [[ ! "$plugin_name" =~ ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$ ]]; then
+  log "Invalid plugin name: $plugin_name"
+  log "Plugin names must be lower-case kebab-case and at most 64 characters."
+  exit 1
+fi
+
+while IFS= read -r skill_dir; do
+  [[ -z "$skill_dir" ]] && continue
 
   source_dir="$repo_root/$skill_dir"
   if [[ ! -d "$source_dir" || ! -f "$source_dir/SKILL.md" ]]; then
     log "Missing skill directory: $source_dir"
     exit 1
   fi
+done <<< "$skill_specs"
 
-  plugin_root="$plugin_parent/$plugin_name"
-  skill_parent="$plugin_root/skills"
-  skill_target="$skill_parent/$skill_dir"
-  manifest_path="$plugin_root/.codex-plugin/plugin.json"
+plugin_root="$plugin_parent/$plugin_name"
+skill_parent="$plugin_root/skills"
+manifest_path="$plugin_root/.codex-plugin/plugin.json"
 
-  log "Syncing plugin: $plugin_name"
-  run mkdir -p "$plugin_root/.codex-plugin" "$skill_parent"
+log "Syncing plugin bundle: $plugin_name"
+run mkdir -p "$plugin_root/.codex-plugin" "$skill_parent"
 
-  if [[ "$dry_run" -eq 1 ]]; then
-    log "[dry-run] replace $skill_target with $source_dir"
-    log "[dry-run] write $manifest_path"
-  else
-    rm -rf "$skill_target"
+if [[ "$dry_run" -eq 1 ]]; then
+  while IFS= read -r skill_dir; do
+    [[ -z "$skill_dir" ]] && continue
+    log "[dry-run] sync $repo_root/$skill_dir to $skill_parent/$skill_dir"
+  done <<< "$skill_specs"
+  if [[ "$plugin_parent" == "$repo_root/plugins" ]]; then
+    for stale_plugin_name in "${legacy_plugin_names[@]}"; do
+      [[ "$stale_plugin_name" == "$plugin_name" ]] && continue
+      log "[dry-run] remove stale plugin package $plugin_parent/$stale_plugin_name"
+    done
+  fi
+  log "[dry-run] write $manifest_path"
+else
+  rm -rf "$skill_parent"
+  mkdir -p "$plugin_root/.codex-plugin" "$skill_parent"
+  while IFS= read -r skill_dir; do
+    [[ -z "$skill_dir" ]] && continue
+    source_dir="$repo_root/$skill_dir"
+    skill_target="$skill_parent/$skill_dir"
     cp -a "$source_dir" "$skill_parent/"
     find "$skill_target" -type d -name __pycache__ -prune -exec rm -rf {} +
     find "$skill_target" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
     rm -rf "$skill_target/evals/fixtures"
-    "$python_cmd" - "$manifest_path" "$plugin_name" "$display_name" "$category" "$description" "$short_description" "$long_description" "$default_prompt" <<'PY'
+  done <<< "$skill_specs"
+
+  if [[ "$plugin_parent" == "$repo_root/plugins" ]]; then
+    for stale_plugin_name in "${legacy_plugin_names[@]}"; do
+      [[ "$stale_plugin_name" == "$plugin_name" ]] && continue
+      rm -rf "$plugin_parent/$stale_plugin_name"
+    done
+  fi
+
+  "$python_cmd" - "$manifest_path" "$plugin_name" "$plugin_display_name" "$plugin_category" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-(
-    manifest_path,
-    plugin_name,
-    display_name,
-    category,
-    description,
-    short_description,
-    long_description,
-    default_prompt,
-) = sys.argv[1:]
+manifest_path, plugin_name, plugin_display_name, category = sys.argv[1:]
 
 payload = {
     "name": plugin_name,
     "version": "0.1.0",
-    "description": description,
+    "description": "Personal Codex skill bundle for Tyemirov workflows.",
     "author": {
-        "name": "Smith",
+        "name": "Tyemirov",
     },
     "skills": "./skills/",
     "interface": {
-        "displayName": display_name,
-        "shortDescription": short_description,
-        "longDescription": long_description,
-        "developerName": "Smith",
+        "displayName": plugin_display_name,
+        "shortDescription": "Personal Codex skill bundle",
+        "longDescription": (
+            "A personal Codex plugin bundle containing Email Cleanup, "
+            "Git Commit, Git Release, and Tidy Folder skills."
+        ),
+        "developerName": "Tyemirov",
         "category": category,
         "capabilities": [
             "Interactive",
             "Write",
         ],
         "defaultPrompt": [
-            default_prompt,
+            "Use Tyemirov skills to commit current repo changes.",
+            "Use Tyemirov skills to clean up Gmail safely.",
+            "Use Tyemirov skills to organize a folder.",
         ],
     },
 }
@@ -228,37 +277,18 @@ path = Path(manifest_path)
 path.parent.mkdir(parents=True, exist_ok=True)
 path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 PY
-  fi
+fi
 
-  if [[ "$dry_run" -eq 1 ]]; then
-    log "[dry-run] add or replace marketplace entry for $plugin_name"
-  else
-    "$python_cmd" - "$marketplace_path" "$marketplace_name" "$marketplace_display_name" "$plugin_name" "$category" <<'PY'
+if [[ "$dry_run" -eq 1 ]]; then
+  log "[dry-run] write marketplace entry for $plugin_name"
+else
+  "$python_cmd" - "$marketplace_path" "$marketplace_name" "$marketplace_display_name" "$plugin_name" "$plugin_category" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 marketplace_path, marketplace_name, marketplace_display_name, plugin_name, category = sys.argv[1:]
 path = Path(marketplace_path).expanduser()
-
-if path.exists():
-    payload = json.loads(path.read_text(encoding="utf-8"))
-else:
-    payload = {
-        "name": marketplace_name,
-        "interface": {
-            "displayName": marketplace_display_name,
-        },
-        "plugins": [],
-    }
-
-payload["name"] = marketplace_name
-interface = payload.setdefault("interface", {})
-if isinstance(interface, dict):
-    interface["displayName"] = marketplace_display_name
-plugins = payload.setdefault("plugins", [])
-if not isinstance(plugins, list):
-    raise SystemExit(f"{path} field 'plugins' must be an array")
 
 entry = {
     "name": plugin_name,
@@ -273,24 +303,24 @@ entry = {
     "category": category,
 }
 
-for index, existing in enumerate(plugins):
-    if isinstance(existing, dict) and existing.get("name") == plugin_name:
-        plugins[index] = entry
-        break
-else:
-    plugins.append(entry)
+payload = {
+    "name": marketplace_name,
+    "interface": {
+        "displayName": marketplace_display_name,
+    },
+    "plugins": [
+        entry,
+    ],
+}
 
 path.parent.mkdir(parents=True, exist_ok=True)
 path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 PY
-  fi
-
-  plugin_names+=("$plugin_name")
-done <<< "$plugin_specs"
+fi
 
 if [[ "$remove_direct_skills" -eq 1 ]]; then
   log "Removing direct Codex skill symlinks that point at this repo"
-  while IFS='|' read -r _plugin_name skill_dir _rest; do
+  while IFS= read -r skill_dir; do
     [[ -z "$skill_dir" ]] && continue
     link_path="$codex_skills_dir/$skill_dir"
     source_path="$repo_root/$skill_dir"
@@ -306,12 +336,17 @@ if [[ "$remove_direct_skills" -eq 1 ]]; then
         log "Skipped unrelated skill link: $link_path -> $current_target"
       fi
     fi
-  done <<< "$plugin_specs"
+  done <<< "$skill_specs"
 fi
 
 if [[ "$install_local" -eq 1 ]]; then
   if [[ "$dry_run" -eq 1 ]]; then
-    log "[dry-run] register marketplace root and install plugins with codex plugin add <plugin>@<marketplace>"
+    for stale_plugin_name in "${legacy_plugin_names[@]}"; do
+      [[ "$stale_plugin_name" == "$plugin_name" ]] && continue
+      log "[dry-run] remove stale local plugin install $stale_plugin_name@$marketplace_name"
+    done
+    log "[dry-run] replace local marketplace source for $marketplace_name"
+    log "[dry-run] install plugin with codex plugin add $plugin_name@$marketplace_name"
   else
     marketplace_name="$("$python_cmd" - "$marketplace_path" <<'PY'
 import json
@@ -325,12 +360,14 @@ PY
 )"
     marketplace_dir="$(cd -- "$(dirname -- "$marketplace_path")" && pwd)"
     marketplace_root="$(cd -- "$marketplace_dir/../.." && pwd)"
-    if ! codex plugin marketplace list | awk '{print $1}' | grep -Fxq "$marketplace_name"; then
-      run codex plugin marketplace add "$marketplace_root"
-    fi
-    for plugin_name in "${plugin_names[@]}"; do
-      run codex plugin add "$plugin_name@$marketplace_name"
+    for stale_plugin_name in "${legacy_plugin_names[@]}"; do
+      [[ "$stale_plugin_name" == "$plugin_name" ]] && continue
+      codex plugin remove "$stale_plugin_name@$marketplace_name" >/dev/null 2>&1 || true
     done
+    codex plugin remove "$plugin_name@$marketplace_name" >/dev/null 2>&1 || true
+    codex plugin marketplace remove "$marketplace_name" >/dev/null 2>&1 || true
+    run codex plugin marketplace add "$marketplace_root"
+    run codex plugin add "$plugin_name@$marketplace_name"
   fi
 fi
 

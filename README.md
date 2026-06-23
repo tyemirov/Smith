@@ -8,24 +8,25 @@ This repository is a Codex plugin marketplace. GitHub discoverability comes
 from the checked-in marketplace and plugin package layout:
 
 - `./.agents/plugins/marketplace.json`
-- `./plugins/email-cleanup`
-- `./plugins/git-commit`
-- `./plugins/git-release`
-- `./plugins/tidy-folder`
+- `./plugins/tyemirov`
 
 After this repository is published, install the marketplace from GitHub:
 
 ```bash
 codex plugin marketplace add tyemirov/Smith --ref master
-codex plugin add email-cleanup@agent-skills
-codex plugin add git-commit@agent-skills
-codex plugin add git-release@agent-skills
-codex plugin add tidy-folder@agent-skills
+codex plugin add tyemirov@agent-skills
 ```
+
+The installed skills appear under the `tyemirov` plugin namespace:
+
+- `tyemirov:Email Cleanup`
+- `tyemirov:Git Commit`
+- `tyemirov:Git Release`
+- `tyemirov:Tidy Folder`
 
 ## Local Development
 
-Regenerate the checked-in plugin packages from the source skill directories:
+Regenerate the checked-in plugin bundle from the source skill directories:
 
 ```bash
 ./sync-plugins.sh
@@ -39,7 +40,7 @@ Use `./sync-plugins.sh --help` for options such as `--plugin-parent`,
 `--marketplace-path`, `--marketplace-name`, and `--dry-run`.
 
 For local smoke testing only, register this checkout as a local marketplace and
-install the plugins:
+install the plugin:
 
 ```bash
 ./sync-plugins.sh --install-local
@@ -72,10 +73,10 @@ Use `./install-skills.sh --help` for options such as `--codex-home`,
 
 | Skill | Codex | Claude Code |
 |---|---|---|
-| Email Cleanup | `$Email Cleanup` | `/email-cleanup` |
-| Git Commit | `$Git Commit` | `/git-commit` |
-| Git Release | `$Git Release` | `/git-release` |
-| Tidy Folder | `$Tidy Folder` | `/tidy-folder` |
+| Email Cleanup | `tyemirov:Email Cleanup` | `/email-cleanup` |
+| Git Commit | `tyemirov:Git Commit` | `/git-commit` |
+| Git Release | `tyemirov:Git Release` | `/git-release` |
+| Tidy Folder | `tyemirov:Tidy Folder` | `/tidy-folder` |
 
 ## Skill format
 
