@@ -1,5 +1,5 @@
 ---
-name: tidy-folder
+name: "Tidy Folder"
 description: |
   Reorganize messy folders into a clean, discoverable structure based on the user's life domains and interests -- not by file type. Use this skill whenever the user asks to organize, tidy, clean up, sort, or declutter any folder or directory. Only use it when the target folder is explicitly provided or clearly identified in the request; if no target folder is specified, stop and ask for one. This skill applies to any directory -- Downloads, Documents, project folders, shared drives, photo libraries, or any other folder the user wants organized.
 ---

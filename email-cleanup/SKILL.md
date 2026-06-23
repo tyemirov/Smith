@@ -1,5 +1,5 @@
 ---
-name: email-cleanup
+name: "Email Cleanup"
 description: "Use when the user wants to clean up Gmail, reduce inbox volume, reach inbox zero, sort or delete old mail, decide what to keep, or identify safe bulk cleanup patterns. Audit the mailbox with a protection-first retention framework, using Gmail connector tools such as `_search_emails`, `_batch_read_email`, `_search_email_ids`, `_list_labels`, and when available `_delete_emails`, `_bulk_label_matching_emails`, `_apply_labels_to_emails`, and `_create_label`."
 ---
 
