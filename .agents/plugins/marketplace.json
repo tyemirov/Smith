@@ -5,46 +5,10 @@
   },
   "plugins": [
     {
-      "name": "email-cleanup",
+      "name": "tyemirov",
       "source": {
         "source": "local",
-        "path": "./plugins/email-cleanup"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Communication"
-    },
-    {
-      "name": "git-commit",
-      "source": {
-        "source": "local",
-        "path": "./plugins/git-commit"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Developer Tools"
-    },
-    {
-      "name": "git-release",
-      "source": {
-        "source": "local",
-        "path": "./plugins/git-release"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Developer Tools"
-    },
-    {
-      "name": "tidy-folder",
-      "source": {
-        "source": "local",
-        "path": "./plugins/tidy-folder"
+        "path": "./plugins/tyemirov"
       },
       "policy": {
         "installation": "AVAILABLE",

@@ -1,0 +1,25 @@
+{
+  "name": "tyemirov",
+  "version": "0.1.0",
+  "description": "Personal Codex skill bundle for Tyemirov workflows.",
+  "author": {
+    "name": "Tyemirov"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Tyemirov",
+    "shortDescription": "Personal Codex skill bundle",
+    "longDescription": "A personal Codex plugin bundle containing Email Cleanup, Git Commit, Git Release, and Tidy Folder skills.",
+    "developerName": "Tyemirov",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use Tyemirov skills to commit current repo changes.",
+      "Use Tyemirov skills to clean up Gmail safely.",
+      "Use Tyemirov skills to organize a folder."
+    ]
+  }
+}
