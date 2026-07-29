@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Features
+- Add the portable Simp repository simplification skill for Codex, Claude Code,
+  Gemini CLI, and Antigravity with a forward-only current-functionality
+  contract.
+
 ## [v1.0.1] - 2026-03-31
 
 ### Improvements
