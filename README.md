@@ -1,6 +1,7 @@
 # Smith
 
-Custom skills for Codex and Claude Code.
+Custom agent skills. Simp uses one portable workflow across Codex, Claude Code,
+Gemini CLI, and Antigravity.
 
 ## Codex Plugin Marketplace
 
@@ -22,6 +23,7 @@ The installed skills appear under the `tyemirov` plugin namespace:
 - `tyemirov:Email Cleanup`
 - `tyemirov:Git Commit`
 - `tyemirov:Git Release`
+- `tyemirov:simp`
 - `tyemirov:Tidy Folder`
 
 ## Local Development
@@ -76,18 +78,35 @@ Use `./install-skills.sh --help` for options such as `--codex-home`,
 | Email Cleanup | `tyemirov:Email Cleanup` | `/email-cleanup` |
 | Git Commit | `tyemirov:Git Commit` | `/git-commit` |
 | Git Release | `tyemirov:Git Release` | `/git-release` |
+| Simp | `tyemirov:simp` | `/simp` |
 | Tidy Folder | `tyemirov:Tidy Folder` | `/tidy-folder` |
+
+### Simp across hosts
+
+Simp's complete directory can be linked into each host without changing its
+workflow:
+
+| Host | Invocation | Personal/global discovery path |
+|---|---|---|
+| Codex | `$simp audit repo` | `~/.agents/skills/simp/` |
+| Claude Code | `/simp audit repo` | `~/.claude/skills/simp/` |
+| Gemini CLI | `Use the simp skill to audit this repository.` | `~/.agents/skills/simp/` |
+| Antigravity | `Use the simp skill to audit this repository.` | `~/.gemini/config/skills/simp/` |
+
+See [`simp/README.md`](simp/README.md) for project-scoped locations and apply
+mode examples.
 
 ## Skill format
 
 Each skill is a self-contained directory with a `SKILL.md` file containing YAML
-frontmatter (`name`, `description`) and the full workflow prompt. This single
-file serves both Codex (via the directory symlink) and Claude Code (via the
-file symlink).
+frontmatter (`name`, `description`) and the full workflow prompt. Simp keeps
+these standard fields as its complete shared frontmatter so Codex, Claude Code,
+Gemini CLI, and Antigravity consume the same workflow.
 
 Optional metadata files:
 
-- `agents/openai.yaml`: UI metadata for Codex skill lists and default prompts.
+- `agents/openai.yaml`: UI metadata, invocation policy, and default prompts for
+  Codex.
 - `agents/runtime.yaml`: subagent routing when a host supports explicit `model`
   and `reasoning_effort` controls. Routing files distinguish `fork-safe` steps
   from `same-worktree` steps so Git mutations stay in the live repository.
