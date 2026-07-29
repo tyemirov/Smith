@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import re
 import shutil
 import subprocess
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -65,6 +67,14 @@ def run(command: list[str], cwd: Path | None = None, check: bool = True) -> subp
     return proc
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def emit(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
@@ -103,6 +113,26 @@ def resolve_default_branch(cwd: Path, override: str | None = None) -> str:
             return line.rsplit(":", 1)[1].strip()
 
     raise HelperError("could not resolve default branch")
+
+
+def resolve_default_branch_local(cwd: Path, override: str | None = None) -> str:
+    if override:
+        return override
+
+    remote_head = run(
+        ["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+        cwd=cwd,
+        check=False,
+    )
+    if remote_head.returncode != 0:
+        raise HelperError(
+            "could not resolve the default branch from local refs",
+            {"required_ref": "refs/remotes/origin/HEAD"},
+        )
+    ref_name = remote_head.stdout.strip()
+    if not ref_name.startswith("origin/") or ref_name == "origin/":
+        raise HelperError("local origin/HEAD ref is invalid", {"ref": ref_name})
+    return ref_name.removeprefix("origin/")
 
 
 def all_tags(cwd: Path) -> list[str]:
@@ -358,23 +388,31 @@ def detect_validation_candidates(cwd: Path) -> list[str]:
 
 
 def command_preflight(args: argparse.Namespace) -> int:
-    missing = require_tools(["git", "gh", "gix"])
+    missing = require_tools(["git"] if args.local else ["git", "gh", "gix"])
     if missing:
         fail("required tools are missing", {"missing_tools": missing})
 
     cwd = repo_root()
-    default_branch = resolve_default_branch(cwd, args.default_branch)
+    default_branch = (
+        resolve_default_branch_local(cwd, args.default_branch)
+        if args.local
+        else resolve_default_branch(cwd, args.default_branch)
+    )
     versions = version_info(cwd, parse_release_timestamp(args.release_timestamp, args.release_date))
     status_lines = run(["git", "status", "--short"], cwd=cwd).stdout.splitlines()
-    open_prs = gh_json(
-        ["gh", "pr", "list", "--base", default_branch, "--state", "open", "--json", "number,title,headRefName,url"],
-        cwd,
-    )
+    current_branch = run(["git", "branch", "--show-current"], cwd=cwd).stdout.strip()
+    open_prs = []
+    if not args.local:
+        open_prs = gh_json(
+            ["gh", "pr", "list", "--base", default_branch, "--state", "open", "--json", "number,title,headRefName,url"],
+            cwd,
+        )
     payload = {
-        "ok": not status_lines and not open_prs,
+        "ok": not status_lines and not open_prs and current_branch == default_branch,
+        "scope": "local" if args.local else "remote",
         "repo_root": str(cwd),
         "default_branch": default_branch,
-        "current_branch": run(["git", "branch", "--show-current"], cwd=cwd).stdout.strip(),
+        "current_branch": current_branch,
         "dirty_status": status_lines,
         "open_prs": open_prs,
         "latest_tag": versions["latest_tag"],
@@ -383,6 +421,388 @@ def command_preflight(args: argparse.Namespace) -> int:
     }
     emit(payload)
     return 0 if payload["ok"] else 1
+
+
+def command_generate_notes(args: argparse.Namespace) -> int:
+    cwd = repo_root()
+    release_date = parse_release_date(args.release_date).isoformat()
+    revision = "HEAD"
+    if args.since_tag:
+        boundary = run(["git", "rev-parse", "--verify", f"{args.since_tag}^{{commit}}"], cwd=cwd, check=False)
+        if boundary.returncode != 0:
+            fail("changelog boundary tag does not resolve locally", {"since_tag": args.since_tag})
+        revision = f"{args.since_tag}..HEAD"
+
+    log_result = run(["git", "log", "--format=%s", revision], cwd=cwd)
+    subjects = [line.strip() for line in log_result.stdout.splitlines() if line.strip()]
+    if not subjects:
+        fail("no local commits are available for release notes", {"revision": revision})
+
+    print(f"## [{args.version}] - {release_date}")
+    print()
+    for subject in subjects:
+        print(f"- {subject}")
+    return 0
+
+
+def release_artifact_dir(cwd: Path, override: str | None = None) -> Path:
+    if override:
+        return Path(override).expanduser().resolve()
+    raw_path = run(["git", "rev-parse", "--git-path", "mprlab-release"], cwd=cwd).stdout.strip()
+    artifact_path = Path(raw_path)
+    if not artifact_path.is_absolute():
+        artifact_path = cwd / artifact_path
+    return artifact_path.resolve()
+
+
+def resolve_commit(cwd: Path, revision: str, label: str) -> str:
+    result = run(["git", "rev-parse", "--verify", f"{revision}^{{commit}}"], cwd=cwd, check=False)
+    if result.returncode != 0:
+        raise HelperError(f"{label} does not resolve to a commit", {label: revision})
+    return result.stdout.strip()
+
+
+def command_initialize_release_artifact(args: argparse.Namespace) -> int:
+    cwd = repo_root()
+    artifact_path = release_artifact_dir(cwd, args.artifact_dir)
+    if artifact_path.exists():
+        shutil.rmtree(artifact_path)
+    (artifact_path / "payloads").mkdir(parents=True)
+    staging = {
+        "schema_version": 1,
+        "artifact_kind": "mprlab.release.staging",
+        "version": args.version,
+        "source_commit": resolve_commit(cwd, args.source_commit, "source_commit"),
+        "release_timestamp": parse_release_timestamp(args.release_timestamp).isoformat(),
+    }
+    (artifact_path / "staging.json").write_text(
+        json.dumps(staging, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    emit({"ok": True, "artifact_dir": str(artifact_path), "staging": staging})
+    return 0
+
+
+def inventory_payloads(artifact_path: Path) -> list[dict[str, Any]]:
+    payload_root = artifact_path / "payloads"
+    if not payload_root.is_dir():
+        return []
+
+    payloads: list[dict[str, Any]] = []
+    for path in sorted(payload_root.rglob("*")):
+        if path.is_symlink():
+            raise HelperError("prepared release payloads must not contain symlinks", {"path": str(path)})
+        if not path.is_file():
+            continue
+        relative_path = path.relative_to(artifact_path).as_posix()
+        payloads.append(
+            {
+                "path": relative_path,
+                "size": path.stat().st_size,
+                "sha256": sha256_file(path),
+            }
+        )
+    return payloads
+
+
+def verify_payloads(artifact_path: Path, payloads: Any) -> list[dict[str, Any]]:
+    if not isinstance(payloads, list):
+        raise HelperError("prepared release payload inventory is invalid")
+
+    expected_paths: set[str] = set()
+    verified: list[dict[str, Any]] = []
+    for entry in payloads:
+        if not isinstance(entry, dict):
+            raise HelperError("prepared release payload entry is invalid", {"entry": entry})
+        relative_path = entry.get("path")
+        if not isinstance(relative_path, str) or not relative_path.startswith("payloads/"):
+            raise HelperError("prepared release payload path is invalid", {"path": relative_path})
+        path = (artifact_path / relative_path).resolve()
+        if artifact_path not in path.parents or not path.is_file() or path.is_symlink():
+            raise HelperError("prepared release payload is missing or unsafe", {"path": relative_path})
+        actual_size = path.stat().st_size
+        actual_sha256 = sha256_file(path)
+        if entry.get("size") != actual_size or entry.get("sha256") != actual_sha256:
+            raise HelperError(
+                "prepared release payload does not match the manifest",
+                {
+                    "path": relative_path,
+                    "expected_size": entry.get("size"),
+                    "actual_size": actual_size,
+                    "expected_sha256": entry.get("sha256"),
+                    "actual_sha256": actual_sha256,
+                },
+            )
+        if relative_path in expected_paths:
+            raise HelperError("prepared release payload path is duplicated", {"path": relative_path})
+        expected_paths.add(relative_path)
+        verified.append(entry)
+
+    actual_paths = {entry["path"] for entry in inventory_payloads(artifact_path)}
+    if actual_paths != expected_paths:
+        raise HelperError(
+            "prepared release payload inventory is incomplete",
+            {"expected_paths": sorted(expected_paths), "actual_paths": sorted(actual_paths)},
+        )
+    return verified
+
+
+def command_write_release_artifact(args: argparse.Namespace) -> int:
+    cwd = repo_root()
+    release_commit = resolve_commit(cwd, args.release_commit, "release_commit")
+    source_commit = resolve_commit(cwd, args.source_commit, "source_commit")
+    head_commit = resolve_commit(cwd, "HEAD", "head")
+    tag_commit = resolve_commit(cwd, args.version, "version")
+    if release_commit != head_commit:
+        fail("release commit must be HEAD", {"release_commit": release_commit, "head": head_commit})
+    if tag_commit != release_commit:
+        fail("local release tag must point at the release commit", {"version": args.version, "tag_commit": tag_commit})
+
+    parent_result = run(["git", "rev-parse", "--verify", f"{release_commit}^"], cwd=cwd, check=False)
+    parent_commit = parent_result.stdout.strip() if parent_result.returncode == 0 else ""
+    if parent_commit != source_commit:
+        fail(
+            "release commit must directly follow the prepared source commit",
+            {"source_commit": source_commit, "release_parent": parent_commit},
+        )
+
+    changed_files = run(
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", release_commit], cwd=cwd
+    ).stdout.splitlines()
+    if changed_files != ["CHANGELOG.md"]:
+        fail("release commit must contain only CHANGELOG.md", {"changed_files": changed_files})
+
+    notes_source = Path(args.notes_file)
+    notes = notes_source.read_text(encoding="utf-8").strip()
+    if not notes:
+        fail("release notes file is empty", {"notes_file": str(notes_source)})
+
+    artifact_path = release_artifact_dir(cwd, args.artifact_dir)
+    staging_path = artifact_path / "staging.json"
+    if not staging_path.is_file():
+        fail("prepared release staging area is missing", {"artifact_dir": str(artifact_path)})
+    staging = json.loads(staging_path.read_text(encoding="utf-8"))
+    expected_staging = {
+        "artifact_kind": "mprlab.release.staging",
+        "version": args.version,
+        "source_commit": source_commit,
+    }
+    for key, expected_value in expected_staging.items():
+        if staging.get(key) != expected_value:
+            fail(
+                "prepared release staging area does not match the release",
+                {"field": key, "expected": expected_value, "actual": staging.get(key)},
+            )
+
+    notes_path = artifact_path / "notes.md"
+    notes_path.write_text(notes + "\n", encoding="utf-8")
+    payloads = inventory_payloads(artifact_path)
+    manifest = {
+        "schema_version": 2,
+        "artifact_kind": "mprlab.release",
+        "version": args.version,
+        "source_commit": source_commit,
+        "release_commit": release_commit,
+        "default_branch": args.default_branch,
+        "release_timestamp": parse_release_timestamp(args.release_timestamp).isoformat(),
+        "notes_sha256": sha256_file(notes_path),
+        "payloads": payloads,
+    }
+    manifest_path = artifact_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    staging_path.unlink()
+    emit({"ok": True, "artifact_dir": str(artifact_path), "manifest": manifest})
+    return 0
+
+
+def load_release_artifact(cwd: Path, override: str | None = None) -> tuple[Path, dict[str, Any], Path]:
+    artifact_path = release_artifact_dir(cwd, override)
+    manifest_path = artifact_path / "manifest.json"
+    notes_path = artifact_path / "notes.md"
+    if not manifest_path.is_file() or not notes_path.is_file():
+        raise HelperError(
+            "prepared release artifact is missing; run make release",
+            {"artifact_dir": str(artifact_path)},
+        )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("schema_version") != 2 or manifest.get("artifact_kind") != "mprlab.release":
+        raise HelperError("prepared release manifest has an invalid contract", {"manifest": str(manifest_path)})
+    actual_notes_sha256 = sha256_file(notes_path)
+    if manifest.get("notes_sha256") != actual_notes_sha256:
+        raise HelperError(
+            "prepared release notes do not match the manifest",
+            {"expected": manifest.get("notes_sha256"), "actual": actual_notes_sha256},
+        )
+    verify_payloads(artifact_path, manifest.get("payloads"))
+    return artifact_path, manifest, notes_path
+
+
+def command_verify_release_artifact(args: argparse.Namespace) -> int:
+    cwd = repo_root()
+    artifact_path, manifest, _ = load_release_artifact(cwd, args.artifact_dir)
+    emit({"ok": True, "artifact_dir": str(artifact_path), "manifest": manifest})
+    return 0
+
+
+def release_asset_paths(artifact_path: Path, manifest: dict[str, Any]) -> list[Path]:
+    prefix = "payloads/release-assets/"
+    assets = [artifact_path / "manifest.json"] + [
+        artifact_path / entry["path"]
+        for entry in manifest.get("payloads", [])
+        if entry["path"].startswith(prefix)
+    ]
+    names = [path.name for path in assets]
+    if len(names) != len(set(names)):
+        raise HelperError("GitHub Release asset names must be unique", {"asset_names": names})
+    return assets
+
+
+def publish_release_assets(cwd: Path, version: str, assets: list[Path]) -> list[dict[str, Any]]:
+    if not assets:
+        return []
+
+    run(["gh", "release", "upload", version, *[str(path) for path in assets], "--clobber"], cwd=cwd)
+    published: list[dict[str, Any]] = []
+    with tempfile.TemporaryDirectory(prefix="mprlab-release-assets-") as temporary_directory:
+        download_root = Path(temporary_directory)
+        for asset in assets:
+            asset_dir = download_root / asset.name
+            asset_dir.mkdir()
+            run(
+                ["gh", "release", "download", version, "--pattern", asset.name, "--dir", str(asset_dir)],
+                cwd=cwd,
+            )
+            downloaded = asset_dir / asset.name
+            expected_sha256 = sha256_file(asset)
+            actual_sha256 = sha256_file(downloaded)
+            if actual_sha256 != expected_sha256:
+                raise HelperError(
+                    "published GitHub Release asset does not match the prepared payload",
+                    {
+                        "asset": asset.name,
+                        "expected_sha256": expected_sha256,
+                        "actual_sha256": actual_sha256,
+                    },
+                )
+            published.append(
+                {
+                    "name": asset.name,
+                    "sha256": actual_sha256,
+                    "size": downloaded.stat().st_size,
+                }
+            )
+    return published
+
+
+def command_publish_prepared_release(args: argparse.Namespace) -> int:
+    missing = require_tools(["git", "gh"])
+    if missing:
+        fail("required tools are missing", {"missing_tools": missing})
+
+    cwd = repo_root()
+    artifact_path, manifest, notes_path = load_release_artifact(cwd, args.artifact_dir)
+    version = str(manifest.get("version") or "")
+    default_branch = str(manifest.get("default_branch") or "")
+    release_commit = str(manifest.get("release_commit") or "")
+    source_commit = str(manifest.get("source_commit") or "")
+    release_assets = release_asset_paths(artifact_path, manifest)
+    if not all((version, default_branch, release_commit, source_commit)):
+        fail("prepared release manifest is incomplete", {"artifact_dir": str(artifact_path)})
+
+    current_branch = run(["git", "branch", "--show-current"], cwd=cwd).stdout.strip()
+    dirty_status = run(["git", "status", "--short"], cwd=cwd).stdout.splitlines()
+    head_commit = resolve_commit(cwd, "HEAD", "head")
+    tag_commit = resolve_commit(cwd, version, "version")
+    errors: list[str] = []
+    if current_branch != default_branch:
+        errors.append(f"current branch is {current_branch or '<detached>'}; expected {default_branch}")
+    if dirty_status:
+        errors.append("worktree is dirty")
+    if head_commit != release_commit:
+        errors.append("HEAD does not match the prepared release commit")
+    if tag_commit != release_commit:
+        errors.append("local release tag does not match the prepared release commit")
+    if errors:
+        fail("prepared release is not publishable", {"errors": errors, "dirty_status": dirty_status})
+
+    remote_ref = f"refs/remotes/{args.remote}/{default_branch}"
+    run(
+        [
+            "git",
+            "fetch",
+            "--prune",
+            args.remote,
+            f"+refs/heads/{default_branch}:{remote_ref}",
+        ],
+        cwd=cwd,
+    )
+    remote_branch_commit = resolve_commit(cwd, remote_ref, "remote_branch")
+    if remote_branch_commit not in (source_commit, release_commit):
+        fail(
+            "remote default branch changed after make release; reconcile and run make release again",
+            {
+                "remote_branch": remote_branch_commit,
+                "prepared_source_commit": source_commit,
+                "prepared_release_commit": release_commit,
+            },
+        )
+
+    open_prs = gh_json(
+        ["gh", "pr", "list", "--base", default_branch, "--state", "open", "--json", "number,title,headRefName,url"],
+        cwd,
+    )
+    if open_prs:
+        fail("open pull requests target the default branch", {"open_prs": open_prs})
+
+    remote_tag_commit = ls_remote_tag_commit(cwd, version)
+    if remote_tag_commit and remote_tag_commit != release_commit:
+        fail(
+            "remote release tag points at a different commit",
+            {"version": version, "remote_tag_commit": remote_tag_commit, "release_commit": release_commit},
+        )
+
+    plan = {
+        "push_branch": remote_branch_commit != release_commit,
+        "push_tag": not remote_tag_commit,
+        "publish_github_release": True,
+        "release_assets": [path.name for path in release_assets],
+    }
+    if args.dry_run:
+        emit(
+            {
+                "ok": True,
+                "dry_run": True,
+                "artifact_dir": str(artifact_path),
+                "version": version,
+                "release_commit": release_commit,
+                "remote": args.remote,
+                "plan": plan,
+            }
+        )
+        return 0
+
+    if plan["push_branch"]:
+        run(["git", "push", args.remote, f"HEAD:refs/heads/{default_branch}"], cwd=cwd)
+    if plan["push_tag"]:
+        run(["git", "push", args.remote, f"refs/tags/{version}:refs/tags/{version}"], cwd=cwd)
+
+    publish_args = argparse.Namespace(version=version, notes_file=str(notes_path), title=None)
+    if command_publish_release(publish_args) != 0:
+        return 1
+    published_assets = publish_release_assets(cwd, version, release_assets)
+    verify_args = argparse.Namespace(
+        version=version,
+        release_commit=release_commit,
+        notes_file=str(notes_path),
+        default_branch=default_branch,
+        watch_run=[],
+        skip_pages=True,
+        expect_pages_text=[],
+    )
+    verify_result = command_verify_release(verify_args)
+    if verify_result == 0 and published_assets:
+        emit({"ok": True, "published_release_assets": published_assets})
+    return verify_result
 
 
 def normalize_markdown(text: str) -> str:
@@ -735,7 +1155,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--release-timestamp",
         help="Release timestamp in ISO format for CalVer candidate generation, for example 2026-04-29T06:17:41 -> 26.429.61741.",
     )
+    preflight.add_argument(
+        "--local",
+        action="store_true",
+        help="Use only local Git state. Do not query GitHub or a remote repository.",
+    )
     preflight.set_defaults(func=command_preflight)
+
+    notes = subparsers.add_parser("generate-notes", help="Generate deterministic release notes from local Git history.")
+    notes.add_argument("--version", required=True)
+    notes.add_argument("--release-date", required=True)
+    notes.add_argument("--since-tag")
+    notes.set_defaults(func=command_generate_notes)
 
     changelog = subparsers.add_parser("insert-changelog", help="Insert generated release notes into CHANGELOG.md.")
     changelog.add_argument("--notes-file", required=True)
@@ -747,6 +1178,45 @@ def build_parser() -> argparse.ArgumentParser:
     publish.add_argument("--notes-file", required=True)
     publish.add_argument("--title")
     publish.set_defaults(func=command_publish_release)
+
+    initialize_artifact = subparsers.add_parser(
+        "initialize-release-artifact",
+        help="Create an empty local staging area for release payloads.",
+    )
+    initialize_artifact.add_argument("--version", required=True)
+    initialize_artifact.add_argument("--source-commit", required=True)
+    initialize_artifact.add_argument("--release-timestamp", required=True)
+    initialize_artifact.add_argument("--artifact-dir")
+    initialize_artifact.set_defaults(func=command_initialize_release_artifact)
+
+    artifact = subparsers.add_parser(
+        "write-release-artifact",
+        help="Write the prepared local release manifest and notes under the repository Git directory.",
+    )
+    artifact.add_argument("--version", required=True)
+    artifact.add_argument("--source-commit", required=True)
+    artifact.add_argument("--release-commit", required=True)
+    artifact.add_argument("--notes-file", required=True)
+    artifact.add_argument("--default-branch", required=True)
+    artifact.add_argument("--release-timestamp", required=True)
+    artifact.add_argument("--artifact-dir")
+    artifact.set_defaults(func=command_write_release_artifact)
+
+    verify_artifact = subparsers.add_parser(
+        "verify-release-artifact",
+        help="Verify the prepared local release manifest, notes, and payload hashes.",
+    )
+    verify_artifact.add_argument("--artifact-dir")
+    verify_artifact.set_defaults(func=command_verify_release_artifact)
+
+    publish_prepared = subparsers.add_parser(
+        "publish-prepared-release",
+        help="Push the prepared branch/tag and publish the matching GitHub Release object.",
+    )
+    publish_prepared.add_argument("--remote", default="origin")
+    publish_prepared.add_argument("--artifact-dir")
+    publish_prepared.add_argument("--dry-run", action="store_true")
+    publish_prepared.set_defaults(func=command_publish_prepared_release)
 
     verify = subparsers.add_parser("verify-release", help="Verify remote tag, GitHub Release, runs, and Pages.")
     verify.add_argument("--version", required=True)
