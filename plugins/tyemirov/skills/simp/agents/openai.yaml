@@ -1,0 +1,7 @@
+interface:
+  display_name: "Simp"
+  short_description: "Simplify current code without retaining obsolete paths"
+  default_prompt: "Use $simp to audit this repository for forward-only simplifications that preserve current supported functionality."
+
+policy:
+  allow_implicit_invocation: false

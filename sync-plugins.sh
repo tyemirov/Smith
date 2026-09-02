@@ -170,6 +170,7 @@ skill_specs="$(cat <<'EOF'
 email-cleanup
 gitcommit
 gitrelease
+simp
 tidy-folder
 EOF
 )"
@@ -257,7 +258,7 @@ payload = {
         "shortDescription": "Personal Codex skill bundle",
         "longDescription": (
             "A personal Codex plugin bundle containing Email Cleanup, "
-            "Git Commit, Git Release, and Tidy Folder skills."
+            "Git Commit, Git Release, Simp, and Tidy Folder skills."
         ),
         "developerName": "Tyemirov",
         "category": category,
@@ -268,6 +269,7 @@ payload = {
         "defaultPrompt": [
             "Use Tyemirov skills to commit current repo changes.",
             "Use Tyemirov skills to clean up Gmail safely.",
+            "Use Simp to audit a repository for forward-only simplifications.",
             "Use Tyemirov skills to organize a folder.",
         ],
     },
