@@ -1,7 +1,7 @@
 # Smith
 
 Custom agent skills. Simp uses one portable workflow across Codex, Claude Code,
-Gemini CLI, and Antigravity.
+OpenCode, Gemini CLI, and Antigravity.
 
 ## Codex Plugin Marketplace
 
@@ -61,15 +61,25 @@ during local cleanup:
 ./install-skills.sh
 ```
 
-This legacy installer links skills directly into Codex and Claude Code from a
-single source:
+This legacy installer links skills directly into selected local agent profiles
+from a single source:
 
 - **Codex**: symlinks each skill directory into `~/.codex/skills/`
 - **Claude Code**: symlinks each `SKILL.md` into `~/.claude/commands/` as a
   slash command (e.g., `/git-release`)
+- **OpenCode**: symlinks each skill directory into
+  `${OPENCODE_CONFIG_DIR:-~/.config/opencode}/skills/`
 
-Use `./install-skills.sh --help` for options such as `--codex-home`,
-`--claude-home`, `--dry-run`, and `--force`.
+Use `--target` to install one or more selected targets. Use
+`--opencode-config-dir` to select an OpenCode profile.
+
+For example, install only into a project-specific OpenCode profile:
+
+```bash
+./install-skills.sh --target opencode --opencode-config-dir /path/to/.opencode
+```
+
+Use `./install-skills.sh --help` for all options.
 
 ## Skills
 
@@ -90,6 +100,7 @@ workflow:
 |---|---|---|
 | Codex | `$simp audit repo` | `~/.agents/skills/simp/` |
 | Claude Code | `/simp audit repo` | `~/.claude/skills/simp/` |
+| OpenCode | `Use the simp skill to audit this repository.` | `~/.config/opencode/skills/simp/` |
 | Gemini CLI | `Use the simp skill to audit this repository.` | `~/.agents/skills/simp/` |
 | Antigravity | `Use the simp skill to audit this repository.` | `~/.gemini/config/skills/simp/` |
 
@@ -101,7 +112,7 @@ mode examples.
 Each skill is a self-contained directory with a `SKILL.md` file containing YAML
 frontmatter (`name`, `description`) and the full workflow prompt. Simp keeps
 these standard fields as its complete shared frontmatter so Codex, Claude Code,
-Gemini CLI, and Antigravity consume the same workflow.
+OpenCode, Gemini CLI, and Antigravity consume the same workflow.
 
 Optional metadata files:
 
