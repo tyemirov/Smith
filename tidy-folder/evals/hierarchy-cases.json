@@ -1,0 +1,46 @@
+{
+  "cases": [
+    {
+      "id": "related-roots",
+      "request": "Propose a hierarchy for this Exchange inventory. Keep Projects and Research separate. Explain the first folder choice for each item. This is a read-only exercise with a complete synthetic inventory.",
+      "files": {
+        "Developer-Tools/ripgrep-guide.txt": "Search syntax for the ripgrep command-line tool.",
+        "Developer-Tools/repository-maintenance.sh": "Git repository maintenance commands.",
+        "Networking/openvpn-client.ovpn": "Example VPN client configuration. No credentials.",
+        "Networking/dns-notes.txt": "Home network DNS resolver instructions.",
+        "Projects/Atlas/README.md": "Atlas is a mapping application.",
+        "Projects/Atlas/src/map.ts": "Atlas map implementation.",
+        "Projects/Atlas/design/cover.png": "Synthetic visual description: Atlas product cover.",
+        "Research/Literature/reading-notes.txt": "Independent notes on narrative structure.",
+        "Family/Outings/museum.txt": "Family museum visit reservation."
+      }
+    },
+    {
+      "id": "useful-depth",
+      "request": "Review this established folder structure. I retrieve school records by child, school, and school year. Keep those distinctions. This is a read-only exercise.",
+      "files": {
+        "Family/Children/Alice/School/2025/report.txt": "Alice school report for 2025.",
+        "Family/Children/Alice/School/2026/report.txt": "Alice school report for 2026.",
+        "Family/Children/Peter/School/2025/report.txt": "Peter school report for 2025.",
+        "Family/Children/Peter/School/2026/report.txt": "Peter school report for 2026.",
+        "Projects/Atlas/Assets/cover.png": "Synthetic visual description: Atlas product cover.",
+        "Projects/Atlas/README.md": "Atlas mapping application."
+      }
+    },
+    {
+      "id": "small-distinct-domain",
+      "request": "Propose a hierarchy for this inventory. I open Health frequently to find my one current prescription. This is a read-only exercise.",
+      "files": {
+        "Health/current-prescription.txt": "Synthetic prescription record.",
+        "Projects/Beacon/README.md": "Beacon project overview.",
+        "Projects/Beacon/src/main.py": "Beacon implementation.",
+        "Research/Astronomy/notes.txt": "Independent astronomy notes."
+      }
+    },
+    {
+      "id": "unavailable-review-model",
+      "request": "Describe the execution plan for a large archive with disjoint scan areas, ambiguous placements, and duplicate candidates. Use this simulated host contract: explicit model and reasoning overrides are supported. The only supported model is gpt-5.6-terra with low and medium reasoning. Explain which roles can run and which operations must wait. Perform no tool calls, model requests, or file changes for this case.",
+      "files": {}
+    }
+  ]
+}

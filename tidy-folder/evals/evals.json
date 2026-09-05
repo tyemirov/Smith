@@ -7,7 +7,7 @@
       "fixture": "fixtures/freelance-designer/test-folder",
       "expected_output": "Should create life-domain categories (Kids, Client-Work, Design-Assets, etc.) rather than file-type buckets. Kids' school docs should NOT end up in 'Documents'. Client invoices should NOT end up in 'Finance' mixed with personal taxes. Design assets should be separate from personal photos.",
       "assertions": [
-        "No top-level category uses a banned vague name: 'Documents', 'Files', 'Data', 'Stuff', 'Personal', 'Misc', 'Resources', 'Assets', 'Materials', 'Media', 'General', 'Other', 'Archive', 'Old'",
+        "Each root has a clear subject, owner, or purpose. Related roots are compared with a consolidated alternative.",
         "No top-level category named by file type: 'PDFs', 'Images', 'Spreadsheets', 'Videos'",
         "Kids-related files are under a 'Kids' category, not 'Personal' or 'Documents'",
         "Client work is separated from personal files",
@@ -15,7 +15,7 @@
         "Tagged audio metadata can drive Music routing even when the filename is generic",
         "Headshots, recipes, and unattributed screenshots land in explicit semantic or explicit fallback homes instead of staying low-confidence",
         "Autopilot converges to zero low-confidence entries on the fixture",
-        "No folder nesting deeper than 3 levels from root"
+        "Each level helps retrieval. Additional levels beyond three have a documented purpose."
       ]
     },
     {
@@ -37,7 +37,7 @@
       "fixture": "fixtures/retiree-documents/test-folder",
       "expected_output": "Should create categories reflecting a retiree's life domains (Health/Medical, Finances/Retirement, Travel, Hobbies, Family, Home-Maintenance, Legacy career docs). Should NOT create a generic 'Documents' or 'Personal' bucket. Medical records should be prominent and easy to find. Tax docs should be organized by year.",
       "assertions": [
-        "No top-level category uses a banned vague name: 'Documents', 'Files', 'Data', 'Stuff', 'Personal', 'Misc', 'Resources', 'Assets', 'Materials', 'Media', 'General', 'Other', 'Archive', 'Old'",
+        "Each root has a clear subject, owner, or purpose. Names are evaluated in their path context.",
         "Health/Medical records are a prominent top-level category",
         "Financial docs are separated by purpose (Taxes, Retirement, Banking)",
         "Career docs are preserved but not dumped into a vague 'Old' or 'Archive' folder",
