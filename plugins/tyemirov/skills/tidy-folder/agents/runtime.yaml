@@ -1,68 +1,68 @@
-version: 1
+# Agent-read routing contract. This is not native Codex configuration.
+# The Python controller does not parse this file or start subagents.
+model_review:
+  reviewed_on: "2026-09-05"
+  availability_source: "Active host subagent tool schema"
+  guidance_source: "https://learn.chatgpt.com/docs/agent-configuration/subagents"
+  maintenance: "Before distribution, verify the exact model IDs and reasoning levels against the destination host."
 
 controller:
   execution: "inherit"
   responsibilities:
-    - "Own the full tidy-folder pass state, pass counters, and artifact custody (snapshot paths, manifest files, logs, and supervisor handoff history)."
-    - "Own the active run lock/lease under .tidy-folder-snapshots, including creation, heartbeat updates, stale-run takeover, and cleanup on exit."
-    - "Require an explicit target folder for every run; do not infer one when the user did not provide it."
-    - "Treat helper-produced manifests, confidence scores, and fallback suggestions as advisory only; final taxonomy belongs to the role handoffs."
-    - "Do not proceed to move execution unless the current run has no unresolved blockers and the gatekeeper handoff is clear."
-    - "Treat snapshot inventory plus move-ledger-based restore as the execution safety contract."
-    - "If execution runs, persist a post-move audit manifest before closing the flow."
-    - "Run the role handoff protocol even when no real subagents are spawned; persisted handoff artifacts are the contract."
+    - "Keep the Supervisor and Router roles in the primary agent."
+    - "Use deterministic helpers for snapshots, moves, restore, and final inventory checks."
+    - "Own the run lock, artifact writes, placement decisions, and final report."
+    - "Apply the hierarchy comparison before moves."
+    - "Treat helper role records as mechanical results, not independent review evidence."
+
+delegation:
+  scope: "Read-only evidence collection and independent review"
+  selection:
+    - "Use one agent for small, clear tasks."
+    - "Delegate disjoint evidence scans when parallel work has a useful benefit."
+    - "Request an independent Gatekeeper for ambiguous placements, sensitive groups, or removal candidates when delegation is available."
+    - "Keep target mutations and shared run artifacts under one owner."
+  capability_check:
+    - "Before delegation, inspect the active tool's supported model IDs and reasoning levels."
+    - "Use the assignments below only when the host supports each exact pair."
+    - "If an assignment is unavailable, report the role, requested pair, and available options."
+    - "Keep that delegation blocked until the user selects a supported assignment or explicitly selects single-agent execution."
+    - "Continue independent read-only work while a required review is blocked. Keep all moves blocked."
+    - "If the host has no delegation capability, use the documented single-agent method unless the user requires independent review."
+    - "Record single-agent review as single_agent. Record actual independent review as independent_subagent."
+    - "When the host cannot verify a model's availability, record it as unverified and keep that delegation blocked."
+  context:
+    - "Give each subagent its bounded task, assigned paths, relevant rules, and necessary evidence."
+    - "Request concise findings and evidence paths instead of a copy of the full inventory."
+    - "Use a fresh or bounded context when the host requires it for model overrides."
+    - "Obey the active host concurrency limit."
+    - "Wait for all required reviews before execution."
+  execution_record:
+    - "Record the role, execution method, requested model, requested reasoning, and model availability evidence."
+    - "For a spawned agent, record its returned identifier and the actual model and reasoning when exposed."
+    - "When actual model metadata is absent, record it as unverified. A request alone does not prove the selected model."
+    - "Keep all model assignments in this file. Recheck them before delegation and distribution."
 
 steps:
   - id: "tidy-folder-preflight"
-    agent_type: "worker"
-    use_subagent_when_available: true
-    workspace: "same-worktree"
-    model: "gpt-5.3-codex-spark"
-    reasoning_effort: "low"
-    scope: "Create/validate rollback snapshot context, create or validate the active run lock/lease, parse user target path, confirm helper/tooling preconditions, and establish the persistent semantic evidence cache path. Persist the preflight handoff under .tidy-folder-snapshots/<snapshot_id>/handoffs/."
-    controller_handoff: "Only continue if an explicit target folder was provided, the target folder exists, snapshot directory policy is clear, and the run lock is held by this run. If a fresh conflicting lock exists, stop. If the lock is stale beyond the lease threshold, write a takeover artifact, assume ownership, and continue non-interactively. Helper availability affects evidence gathering only; it does not change agent decision authority."
-
+    execution: "primary_agent_with_scripts"
+    scope: "Establish the target, snapshot, and run lock."
   - id: "tidy-folder-scout"
-    agent_type: "worker"
-    use_subagent_when_available: true
-    workspace: "same-worktree"
-    model: "gpt-5.4-mini"
+    execution: "conditional_subagent"
+    model: "gpt-5.6-terra"
     reasoning_effort: "medium"
-    scope: "Run semantic_scan and related shell probes as evidence collectors, persist manifest.json or equivalent draft artifacts, produce structured low-confidence lists plus per-file signals, and emit grouped evidence packets for representative audit. This role may run in-process or as a delegated worker, but the artifact contract is the same."
-    controller_handoff: "Return helper artifact paths, candidate homes, low-confidence signals, raw evidence packets, grouped evidence summaries, and any high-risk cluster markers only. Do not make final placement decisions. If helper output is weak, conflicting, or unchanged across passes, explicitly request Router/Gatekeeper reconciliation."
-
+    scope: "Inspect assigned paths. Return raw evidence, candidate groups, and unresolved questions."
   - id: "tidy-folder-router"
-    agent_type: "worker"
-    use_subagent_when_available: true
-    workspace: "same-worktree"
-    model: "gpt-5.4"
-    reasoning_effort: "medium"
-    scope: "Own destination decisions. Convert scout evidence and any helper-generated draft manifest into auditable manifest entries, apply the explicit evidence-precedence order, enforce existing taxonomy anchors, and generate rationale/alternatives for each candidate. Draft actions must be written as a concrete artifact, not kept only in memory."
-    controller_handoff: "Submit the manifest candidate set plus unresolved blockers. Explicitly record when helper suggestions were kept, refined, or overridden, and when representative-cluster review was used instead of full-file review. Do not clear execution unless all hard blockers are addressed in this handoff."
-
+    execution: "primary_agent"
+    scope: "Select destinations. Compare root alternatives and record the chosen hierarchy."
   - id: "tidy-folder-gatekeeper"
-    agent_type: "worker"
-    use_subagent_when_available: true
-    workspace: "same-worktree"
-    model: "gpt-5.3-codex-spark"
-    reasoning_effort: "medium"
-    scope: "Validate the manifest against hard gates: no unresolved ambiguity, no banned or vague top-level categories, no duplicate taxonomy intent, no X/X nesting, project atomicity intact, and cross-domain tie-breaks explicit. Review raw Scout evidence independently for deletion candidates, sensitive buckets, and representative samples from each major home rather than relying only on Router prose. Treat helper low-confidence counts and helper gate failures as advisory inputs that must be confirmed or overruled explicitly. Persist active_gate_failures and the independent sample log in the gatekeeper handoff."
-    controller_handoff: "The handoff is clear only when all gate checks are green, the independent sample review is complete, and active_gate_failures is empty. If helper or Router findings are overridden, include the override rationale. If blocked, provide a concrete correction list and stop."
-
+    execution: "conditional_subagent"
+    model: "gpt-5.6-sol"
+    reasoning_effort: "high"
+    scope: "Review raw evidence and proposed actions against the skill's gates. Return specific failures or a clear result."
   - id: "tidy-folder-executor"
-    agent_type: "worker"
-    use_subagent_when_available: true
-    workspace: "same-worktree"
-    model: "gpt-5.3-codex-spark"
-    reasoning_effort: "low"
-    scope: "Execute moves, renames, and deterministic cleanup only when the current run is clear for execution. Preserve project-relative subtrees when the destination is derived from a detected project root. Route deletions into the run snapshot trash with a cleanup ledger instead of permanent erase during the active run. Emit action deltas, move-ledger entries, and post-move verification stats into the executor handoff."
-    controller_handoff: "Report skipped/failed moves, touched paths, cleanup-ledger entries, and manifest delta. Halt if any operation violates target root, lock ownership, snapshot contract, or post-move drift."
-
+    execution: "primary_agent_with_scripts"
+    scope: "Apply only reviewed actions. Preserve project internals, the lock, the move ledger, and reversible cleanup."
   - id: "tidy-folder-audit-and-report"
-    agent_type: "worker"
-    use_subagent_when_available: true
-    workspace: "same-worktree"
-    model: "gpt-5.4-mini"
-    reasoning_effort: "medium"
-    scope: "Run final tree audit, produce completion ledger including pass count, refinement history, gate outcomes, helper-vs-final decision deltas, and any post-move verification manifest. Ensure final tree is user-readable and deterministic."
-    controller_handoff: "Return final signed completion report or residual unresolved risks. Do not introduce a new confirmation step unless a gate failure prevented safe execution."
+    execution: "primary_agent_with_scripts"
+    scope: "Verify the final inventory and report actual outcomes, review method, and unresolved limits."

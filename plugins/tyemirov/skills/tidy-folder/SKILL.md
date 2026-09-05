@@ -1,10 +1,18 @@
 ---
-name: "Tidy Folder"
+name: "tidy-folder"
 description: |
-  Reorganize messy folders into a clean, discoverable structure based on the user's life domains and interests -- not by file type. Use this skill whenever the user asks to organize, tidy, clean up, sort, or declutter any folder or directory. Only use it when the target folder is explicitly provided or clearly identified in the request; if no target folder is specified, stop and ask for one. This skill applies to any directory -- Downloads, Documents, project folders, shared drives, photo libraries, or any other folder the user wants organized.
+  Organize a specified folder by subject, project, and user lookup behavior. Use for folder cleanup, hierarchy proposals, and taxonomy reviews. Preserve meaningful groups and reversible file operations.
 ---
 
 # Tidy Folder
+
+## Select The Operation
+
+- For a review or proposal, inspect only the specified inputs. Keep the target unchanged.
+- For file operations, require an explicit target folder and user authorization for the requested operation.
+- Before a file operation, read [agents/runtime.yaml](agents/runtime.yaml) for role assignments and model checks.
+- For an execution plan, read the same routing file before you assign roles.
+- Resolve script paths relative to this skill directory. The examples below run from this directory.
 
 You are reorganizing a folder to make its contents **discoverable** -- meaning the user can find any file by thinking about what it *is*, not what format it's in.
 
@@ -26,6 +34,33 @@ When more than one home seems plausible, choose the most specific one that match
 A project's support files belong with that project even when they are images, screenshots, videos, audio, or generated art. If the user would look for the file by project name first, it does not belong in `Photos` just because it has pixels. Use `Photos` for memory photos and event snapshots whose primary purpose is the moment itself, not the project.
 
 When helpful, create a role folder inside the specific home, such as `Cover-Art`, `Screenshots`, `Exports`, `References`, `Source`, `Drafts`, `Receipts`, or `Statements`.
+
+## Design The Hierarchy
+
+First identify which files belong together. Then select the hierarchy for those groups.
+A specific home does not require a top-level folder.
+
+- Use top-level folders for distinct first destinations in the user's search.
+- Use children for related subjects, activities, or named projects within those destinations.
+- Add further levels when they make the next choice easier.
+- Compare sibling folders at a similar level of scope.
+- Use file counts as evidence, not as a minimum requirement or a target count.
+- Keep a small, frequently used domain separate when that matches the user's search.
+- Prefer three or fewer folder levels. Keep additional levels when each level has a useful distinction.
+- Preserve project internals and established paths that help the user find files.
+
+Before moves, compare the proposed root folders with a consolidated alternative:
+
+1. Identify related roots that have a familiar shared parent.
+2. Define the parent's scope and its boundary with other roots.
+3. Examine the first folder choice with representative files, including ambiguous files.
+4. Select the structure with clearer choices and useful levels.
+5. Record retained roots, consolidation decisions, and any depth exception in the Router handoff.
+
+For example, `Computing/Developer-Tools` and `Computing/Networking` can share a clear first destination.
+This example is not a required taxonomy.
+Keep `Projects` and `Research` separate when the user distinguishes work in progress from independent study.
+Keep research for a named project with that project.
 
 ## Attribution Sources
 
@@ -107,7 +142,11 @@ Use the `scripts/semantic_scan.py` helper when it is available. Its job is to ga
 - The helper contract is to surface evidence packets and draft candidate homes that agents review. Its outputs are advisory, not authoritative.
 - The controller-backed workflow reuses a persistent evidence cache under `./.tidy-folder-snapshots/semantic-evidence-cache.json` so repeated manifest/audit passes do not re-extract every unchanged file.
 
-Use `scripts/run_tidy_folder.py` for the full workflow. It creates the rollback snapshot for the provided folder, persists draft manifests and handoff artifacts, executes immediately when the current run is clear, and can restore any prior execution snapshot by id.
+Use `scripts/run_tidy_folder.py` for snapshots, draft manifests, and mechanical verification.
+Its default command creates a proposal without moves.
+The helper does not read `agents/runtime.yaml` or start subagents.
+The producing agent owns model selection, hierarchy decisions, and review evidence.
+Helper-generated role records are not evidence of an independent agent review.
 
 ### Dependency and execution model
 
@@ -117,17 +156,14 @@ Use `scripts/run_tidy_folder.py` for the full workflow. It creates the rollback 
 - For helper debugging only, you may inspect evidence directly with:
 
 ```bash
-cd /Users/tyemirov/Development/agentSkills/tidy-folder
-./scripts/semantic_scan.py /path/to/folder --manifest --autopilot
+uv run --script scripts/semantic_scan.py /path/to/folder --manifest --autopilot
 ```
 
 - For actual skill use, always start with the controller so the folder is snapshotted before any scan or move:
 
 ```bash
-cd /Users/tyemirov/Development/agentSkills/tidy-folder
-./scripts/run_tidy_folder.py /path/to/folder
-./scripts/run_tidy_folder.py /path/to/folder --execute
-./scripts/run_tidy_folder.py /path/to/folder --restore-snapshot <snapshot_id>
+uv run --script scripts/run_tidy_folder.py /path/to/folder
+uv run --script scripts/run_tidy_folder.py /path/to/folder --restore-snapshot <snapshot_id>
 ```
 
 - Do not run the skill against an unspecified folder. If the user did not name a folder, ask for the folder first.
@@ -142,6 +178,10 @@ cd /Users/tyemirov/Development/agentSkills/tidy-folder
 
 - Vision mode stays opt-in. When you request `--vision --vision-provider hf`, the script bootstraps the extra local `transformers`/`torch` runtime on demand through `uv`; use `--vision-provider openai` to route image/video understanding through an API model instead (requires `OPENAI_API_KEY`).
 - Vision readiness checks stay lightweight: they validate provider/tool prerequisites without forcing a warm-up caption pass before the main scan.
+- Before API vision use, verify the selected model's image support, endpoint compatibility, and account access.
+- Read the scanner's current model configuration. Subagent model assignments do not select the API vision model.
+- Record the actual vision provider and model. A local prerequisite check does not prove provider acceptance.
+- Use external vision only within the user's authorization to send the selected content.
 - Helpers are optional accelerators. If a helper cannot answer a question cleanly, continue with shell inspection and agent reasoning rather than pretending the helper made a decision.
 
 Native tools like `ffmpeg`, `pdftotext`, `tesseract`, `mdls`, `file`, `strings`, and `antiword` are optional accelerators. If a machine does not have them, the scanner still works, but some files will stay low-confidence until enough evidence is available.
@@ -152,35 +192,28 @@ Treat the script as an evidence collector and artifact writer. The skill's AI ag
 - Low-confidence draft entries are non-routable by default: keep their evidence and candidates explicit until reconciliation resolves them.
 - Narrow deterministic fallback homes are allowed only after evidence extraction is exhausted and the workflow still records them as blocked candidates: `Screen-Captures` for unattributed screenshots/screencasts, plus `Recovery/Unknown-Text` and `Recovery/Unknown-Binary` for genuinely opaque leftovers.
 
-## The Banned Words List
+## Category Names And Scope
 
-**NEVER use any of the following as a category name.** These are vague abstractions that tell the user nothing about what's inside:
+A broad category can have a precise scope. Evaluate the name with its parent and siblings.
+`Computing` can identify a domain. `Resources` alone does not identify a subject or owner.
 
-- **Documents** -- everything is a document. This says nothing.
-- **Files** -- even more meaningless than "Documents".
-- **Data** -- what data? Tax data? Health data? Kids' school data? Name the domain.
-- **Stuff** / **Things** / **Items** -- not categories, just avoidance of thought.
-- **Personal** -- as opposed to what? Everything in the folder is personal. Be specific: is it Health? Finance? Family?
-- **Misc** / **Miscellaneous** / **Other** / **Unsorted** -- if you can't name it, you haven't understood it. Go back and read the file contents.
-- **General** / **Common** / **Shared** -- shared by whom? General to what?
-- **Resources** / **Assets** / **Materials** -- these are filler words. "Design resources" is "Design-Assets". "Tax materials" is "Finance/Taxes".
-- **Archive** / **Old** / **Legacy** -- age is not a category. A 2018 tax return goes in Finance/Taxes, not "Archive".
-- **Media** -- a video of your daughter's recital and a downloaded movie trailer have nothing in common. Name what the media is about.
-- **Downloads** / **Inbox** / **New** -- these describe how files arrived, not what they are.
-- **Untitled** / **Temp** / **tmp** -- if it exists, it means something. Figure out what.
-
-If you find yourself reaching for any of these words, stop and read the files again. The real category name is hiding inside the files themselves.
-
-The only exception: a subfolder inside a well-named parent (e.g., `3D-Printing/Assets/` or `Business/Pitch-Decks/<Project>/Screenshots/` is fine because the parent already gives context).
+- Select names that explain the contents and differ clearly from sibling names.
+- Use broad parents when their children share a recognizable subject or purpose.
+- Use names such as `Assets` or `References` when the parent supplies the project or subject.
+- Preserve an explicit user workflow, such as a defined backup collection or an intake folder.
+- Replace catch-all names when they hide unrelated contents.
+- Treat helper warnings about names as review inputs. Record any evidence-based override.
+- Keep unresolved files explicitly blocked until sufficient evidence supports a destination.
 
 ### Quality Gate: Taxonomy Failure Protection
 
 Before you begin **any move**, enforce this gate. If any item fails, reroute taxonomy design automatically and refine before continuing.
 
 1. **Semantic fidelity check**
-   - If a folder name is vague (`Media`, `Personal`, `References`, etc.), replace with a specific, discoverable home.
+   - Apply Category Names And Scope to each complete destination path.
    - `Projects` is only acceptable when the source actually contains distinct project roots or a deliberate project parent with project-specific children.
-   - For every proposed top-level folder, keep at least three expected file examples and at least one concrete use case in the rationale. If confidence is weak, keep the folder out of top-level taxonomy and continue narrowing evidence.
+   - For each root, record its scope, a real file example, and the user's first folder choice.
+   - Compare related roots under Design The Hierarchy before you accept their final positions.
 
 2. **Project atomicity check**
    - Detect and preserve project roots as separate siblings unless evidence proves one should be nested inside another.
@@ -193,7 +226,7 @@ Before you begin **any move**, enforce this gate. If any item fails, reroute tax
 
 4. **Redundant nesting check**
    - No immediate parent-child pair should repeat the same semantic label (`X/X`, `Reading/Reading`, `Home/Home`).
-   - Folder depth should not exceed 3 levels for personal taxonomy nodes unless it's an actual project internals hierarchy.
+   - Apply the depth preference in Design The Hierarchy. Record the purpose of each additional level.
 
 5. **Content-first placement check**
    - A media file is grouped by project/topic/folder owner first, not by extension.
@@ -292,7 +325,7 @@ for dir in */; do echo "$(find "$dir" -type f ! -name '.DS_Store' | wc -l) files
 # Loose files at root
 find . -maxdepth 1 -type f ! -name '.*'
 
-# Nesting depth check (anything > 3 levels is a red flag)
+# Review the purpose of additional levels
 find . -type d -mindepth 4
 ```
 
@@ -338,7 +371,9 @@ Remember that an existing folder tree is often already semantically coherent eve
 
 **Step 5: Propose the taxonomy**
 
-Design only as many top-level categories as the inventory clearly supports. Small folders may need only 1-5 top-level homes; larger mixed archives may need more. Do not force a target count. Within each category, prefer the most specific stable subfolder that the inventory supports. Do not default to generic child folders like `Images`, `Media`, `Stuff`, or `Misc`; choose role-based or project-based names that tell the user what is inside. If the inventory reveals a repeated project or product name, create a project-specific home before falling back to a broader bucket.
+Apply Design The Hierarchy after content classification.
+Select a specific home for each group before you decide which groups require root folders.
+Use Category Names And Scope for names at each level.
 
 Publish the taxonomy proposal internally with a brief description of what goes in each. Possible domains when the evidence supports them:
 
@@ -357,12 +392,14 @@ Publish the taxonomy proposal internally with a brief description of what goes i
 
 These are examples. The actual categories should emerge from the inventory, not from a template. `Projects` is a valid option only if projects are actually present in the source. A musician might need `Music`. A photographer might need `Client-Work`. A student might need `Courses`.
 
-If a group of files shows coherent shared structure (e.g., repeated CSV schema columns, shared report titles, recurring partner names, common tags) and no existing top-level node matches, the taxonomy should grow upward: add a new higher-level node for that inferred domain, then place files under it (or under a project leaf beneath it).
+When related files need a new home, first evaluate a child under an existing domain.
+Add a root only when it supplies a distinct first destination.
 
 Example:
 - If several `CSV` files share `order_id`, `vendor_id`, `ship_date`, and `account_code`, and nothing in the current tree fits `Finance`/`Business`/`Projects`, add `Operations` or `Work/Operations` first, then place the CSV set under a specific child like `Operations/Reporting`.
 
-**Self-check before proposing:** Review every proposed category name against the Banned Words List above. If any category could be replaced with a more specific name that tells the user what's actually inside, replace it. The test: if someone sees only the folder name with zero context, can they predict at least 3 files that would be inside? "Finance" -- yes (taxes, bank statements, mortgage docs). "Data" -- no (data about what?). "Resources" -- no (resources for what?). If a project name repeats across several files, prefer that project name over a generic bucket. If the file is a screenshot, cover, mockup, trailer, demo recording, or generated image for a named project, classify it by the project, not by the medium.
+**Self-check before proposing:** Examine representative paths against the user's likely first folder choice.
+Keep the hierarchy comparison and the reasons for retained roots in the Router handoff.
 
 **Quality gate required before moving anything**: run the "Taxonomy Failure Protection" checks from above (semantic fidelity, project atomicity, duplicate-category, redundant nesting, content-first placement, and cross-domain tie-break) and document which checks passed or what remains ambiguous.
 
@@ -371,8 +408,7 @@ If pre-existing folders already encode a structure, treat those as starting taxo
 Before moves begin, create a draft placement manifest as the shared working artifact:
 
 ```bash
-cd /Users/tyemirov/Development/agentSkills/tidy-folder
-./scripts/run_tidy_folder.py <target-folder>
+uv run --script scripts/run_tidy_folder.py <target-folder>
 ```
 
 The controller writes its draft manifest and handoff records into `./.tidy-folder-snapshots/<snapshot_id>/` inside the target folder, including `tree.txt`, `files.txt`, `file-metadata.tsv`, `manifest.json`, `draft-actions.json`, `handoffs/00-supervisor.json`, and the per-phase handoff files for preflight, scout, router, gatekeeper, executor, and audit. When execution runs, it also writes `move-ledger.json` plus a post-move audit manifest. Restore runs write `restore-report.json`. These artifacts are the run log and rollback contract.
@@ -402,7 +438,7 @@ Hard execution gate:
   - Duplicate top-level category intent
   - Repeated/needless nesting (`X/X`)
   - Project roots merged without evidence
-  - Proposal uses banned vagueness words at destination
+  - Destination has no clear subject, owner, or purpose in its path context
   - Any `low_confidence` destination
 - If there are blockers, iterate Step 5.5 automatically and repair the taxonomy before continuing.
 
@@ -410,7 +446,11 @@ If the manifest is written and validated, proceed with move execution only when 
 
 ## Role-Based Orchestration Protocol
 
-Use this protocol whenever you involve sub-agents in execution. This protocol is the control plane. When sub-agents are unavailable or unnecessary, the controller must still persist the same role handoff artifacts locally so the workflow stays auditable.
+These roles define responsibilities, not a required number of agents.
+Apply [agents/runtime.yaml](agents/runtime.yaml) before you select the execution method.
+Keep the role records when one agent performs several roles.
+Record each review as `single_agent` or `independent_subagent` with evidence of the actual execution method.
+Only a separate reviewing agent supplies independent review evidence.
 
 ### Supervisor (Flow Controller)
 
@@ -444,9 +484,10 @@ Use this protocol whenever you involve sub-agents in execution. This protocol is
   - helper-reported low confidence that remains unresolved after reconciliation,
   - placement modes that are not high-confidence,
   - unresolved `needs_refinement` entries,
-  - taxonomy gate failures (vague top-level intent, duplicate semantics, redundant nesting, project split violations, shallow depth violations, cross-domain tie-break errors).
-- Must inspect raw `Scout` evidence independently, not just `Router` rationale.
-- Must independently review:
+  - Taxonomy failures: unclear scope, duplicate intent, redundant levels, project splits, or incorrect cross-domain decisions.
+- Inspect raw Scout evidence as well as the Router rationale.
+- Record the review method under Role-Based Orchestration Protocol.
+- Review:
   - every deletion candidate,
   - every sensitive bucket (`Health`, `Finance`, `Legal`, `Identity`, kids records),
   - and a representative sample from each major proposed home, including at least one weak-signal example.
@@ -483,6 +524,7 @@ Before committing the first move set, inspect the structure that has started to 
 This is an iterative cycle. Treat the taxonomy as a working hypothesis, then let the files push back on it:
 
 - Merge thin or duplicate categories that are really the same home.
+- Compare related roots under Design The Hierarchy. Keep the specific child groups when a shared parent improves retrieval.
 - Split overloaded categories when repeated evidence suggests a stable leaf folder.
 - Reassign files from a broad parent into a new leaf when accumulated understanding makes that leaf the more specific and more searchable home.
 - Prefer repeated evidence or strong cross-file context over a one-off guess before creating a new leaf.
@@ -504,12 +546,17 @@ If later auditing reveals that a broad category should actually be split differe
 Use the validated placement manifest from Step 5 as the execution plan.
 
 This step runs only when Step 5/5.5 has completed with no unresolved blockers.
+Compare the actual action list with the reviewed manifest before execution.
+If a helper rescan changes the actions, review those changes before moves.
+The controller's `--execute` option runs a new scan. It does not consume an agent-approved manifest from a prior run.
+Use deterministic file operations with the current lock and ledger for agent-revised actions.
+If the available execution method cannot preserve the reviewed actions, stop before moves and report the missing capability.
 
 Execute the reorganization in a single logical pass per category, after the emerging taxonomy has been reviewed and refined. Key principles:
 
 - **Fix typos**: "DIsney with Charachters" becomes "Disney-Characters"
 - **Normalize names**: Use dashes instead of spaces, capitalize meaningfully. "beercss-3.8.0" becomes "BeerCSS-3.8.0"
-- **Flatten unnecessary nesting**: If a path is `Sorted/Archive/Legacy/Archive/Directory_Downloads/Directory_Archive/`, something went wrong. No file should be more than 3 levels deep from the root unless it's a code project with its own internal structure
+- **Remove redundant levels**: Apply Design The Hierarchy. Preserve additional levels with a documented retrieval purpose.
 - **Preserve project internals**: Code repos, node_modules, build artifacts, and already coherent project trees -- leave their internal structure alone. Only move the top-level project folder or the clearly misfiled leaf, not the meaningful internal hierarchy.
 - If a manifest entry resolves to a project home because of a detected project root, preserve the relative subtree beneath that project root during execution. Do not flatten `src/`, `components/`, or other internal paths into the project root.
 - **Handle duplicates**: If two folders contain the same content (e.g., material-web and material-web-main), keep one canonical project root and remove the duplicate deterministically.
@@ -593,12 +640,12 @@ After restoration, rerun Step 7 (audit) on a quick sample to confirm that the pr
 
 **The visible-content trap**: do not ignore what the file shows just because the filename is generic. If the image shows a deck cover, product screenshot, logo, or project branding, that is project evidence and should drive the placement.
 
-**The vague-name trap**: "Documents", "Data", "Files", "Resources", "Personal", "Misc" -- these are not categories, they're admissions that you didn't look hard enough. If you can't name a category specifically, you haven't understood the files inside it. Go back to Phase 1, read the actual file contents, and figure out what domain they belong to. Every file in a person's folder belongs to some concrete life domain -- their kids' school, their taxes, their hobby, their job. Find that domain and name the folder after it.
+**Unclear scope**: Apply Category Names And Scope to the complete path, not an isolated word.
 
-**Over-nesting**: `Family/Housing/Leases/2025/January/` is too deep. `Family/Housing/Leases/` with the files right there is fine. Humans don't think in 5-level hierarchies.
+**Unnecessary levels**: Keep each level that helps retrieval. Remove levels that only repeat their parent's meaning.
 
 **Under-auditing**: The first pass will get 80% of files right. The remaining 20% -- the ones where the filename doesn't match the content -- are what determine whether the reorganization actually helps. Always do the deep content audit.
 
 **Frozen first pass**: A provisional category is not final just because it was the first guess. If new evidence points to a clearer leaf folder, reassign the file there before you finish.
 
-**Previous sorting attempts**: If someone (or another AI) has already tried to sort the folder, you'll likely find remnants: empty category folders, deeply nested archive structures, files moved into generic buckets. Don't build on top of these -- understand what the previous attempt did, rescue the files, and start fresh with your own taxonomy.
+**Existing organization**: Preserve useful structure. Change prior decisions only when content evidence or the user's search supports the change.
