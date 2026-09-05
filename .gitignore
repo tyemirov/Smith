@@ -7,3 +7,7 @@ __pycache__/
 .env.*
 .DS_Store
 tidy-folder/evals/fixtures/
+
+# BEGIN MPRLAB-GOVERNANCE
+/.mprlab/*-PLAN.md
+# END MPRLAB-GOVERNANCE
