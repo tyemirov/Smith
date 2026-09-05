@@ -7,19 +7,26 @@ codex_home="${CODEX_HOME:-$HOME/.codex}"
 skills_dir="$codex_home/skills"
 claude_home="${CLAUDE_HOME:-$HOME/.claude}"
 claude_commands_dir="$claude_home/commands"
+opencode_config_dir="${OPENCODE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/opencode}"
+opencode_skills_dir="$opencode_config_dir/skills"
 dry_run=0
 force=0
+targets=()
 
 usage() {
   cat <<'EOF'
-Usage: install-skills.sh [--codex-home PATH] [--claude-home PATH] [--dry-run] [--force]
+Usage: install-skills.sh [--target TARGET] [--codex-home PATH] [--claude-home PATH] [--opencode-config-dir PATH] [--dry-run] [--force]
 
-Symlink the custom skills in this repository into the Codex skills directory
-and Claude Code user commands directory.
+Symlink the custom skills in this repository into selected local agent skill
+directories. Repeat --target to select more than one target.
 
 Options:
+  --target TARGET      Install codex, claude, or opencode. Defaults to all targets.
   --codex-home PATH   Override the Codex home directory. Defaults to $CODEX_HOME or ~/.codex.
   --claude-home PATH  Override the Claude home directory. Defaults to $CLAUDE_HOME or ~/.claude.
+  --opencode-config-dir PATH
+                       Override the OpenCode config directory. Defaults to
+                       $OPENCODE_CONFIG_DIR or ~/.config/opencode.
   --dry-run           Show what would change without modifying the filesystem.
   --force             Replace existing skill paths after moving them into a backup directory.
   -h, --help          Show this help.
@@ -47,13 +54,14 @@ run() {
 }
 
 backup_root=""
+backup_parent=""
 
 ensure_backup_root() {
   if [[ -n "$backup_root" ]]; then
     return 0
   fi
 
-  backup_root="$skills_dir/.custom-skills-backup-$(date +%Y%m%d-%H%M%S)"
+  backup_root="$backup_parent/.custom-skills-backup-$(date +%Y%m%d-%H%M%S)"
   run mkdir -p "$backup_root"
 }
 
@@ -99,8 +107,34 @@ slug_from_name() {
 
 skill_dirs=()
 
+target_selected() {
+  local expected="$1"
+  local target
+  for target in "${targets[@]}"; do
+    if [[ "$target" == "$expected" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --target)
+      if [[ $# -lt 2 ]]; then
+        log "Missing value for --target"
+        exit 1
+      fi
+      case "$2" in
+        codex|claude|opencode) targets+=("$2") ;;
+        *)
+          log "Unknown target: $2"
+          usage
+          exit 1
+          ;;
+      esac
+      shift 2
+      ;;
     --codex-home)
       if [[ $# -lt 2 ]]; then
         log "Missing value for --codex-home"
@@ -117,6 +151,15 @@ while [[ $# -gt 0 ]]; do
       fi
       claude_home="$2"
       claude_commands_dir="$claude_home/commands"
+      shift 2
+      ;;
+    --opencode-config-dir)
+      if [[ $# -lt 2 ]]; then
+        log "Missing value for --opencode-config-dir"
+        exit 1
+      fi
+      opencode_config_dir="$2"
+      opencode_skills_dir="$opencode_config_dir/skills"
       shift 2
       ;;
     --dry-run)
@@ -139,6 +182,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "${#targets[@]}" -eq 0 ]]; then
+  targets=(codex claude opencode)
+fi
+
 while IFS= read -r -d '' skill_dir; do
   skill_dirs+=("$skill_dir")
 done < <(find "$repo_root" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -exec test -f '{}/SKILL.md' ';' -print0 | sort -z)
@@ -148,117 +195,138 @@ if [[ "${#skill_dirs[@]}" -eq 0 ]]; then
   exit 1
 fi
 
-run mkdir -p "$skills_dir"
-
 log "Repo root: $repo_root"
-log "Codex home: $codex_home"
-log "Codex skills dir: $skills_dir"
-log "Claude commands dir: $claude_commands_dir"
+log "Targets: ${targets[*]}"
 
-linked_count=0
-skipped_count=0
+install_directory_target() {
+  local label="$1"
+  local target_dir="$2"
+  local linked_count=0
+  local skipped_count=0
+  local source_dir skill_name target_path source_path current_target
 
-for source_dir in "${skill_dirs[@]}"; do
-  skill_name="$(basename "$source_dir")"
-  target_path="$skills_dir/$skill_name"
-  source_path="$(canonical_path "$source_dir")"
+  run mkdir -p "$target_dir"
+  backup_root=""
+  backup_parent="$target_dir"
 
-  if [[ -L "$target_path" ]]; then
-    current_target="$(resolve_link_target "$target_path")"
-    if [[ -e "$current_target" ]]; then
-      current_target="$(canonical_path "$current_target")"
+  for source_dir in "${skill_dirs[@]}"; do
+    skill_name="$(basename "$source_dir")"
+    target_path="$target_dir/$skill_name"
+    source_path="$(canonical_path "$source_dir")"
+
+    if [[ -L "$target_path" ]]; then
+      current_target="$(resolve_link_target "$target_path")"
+      if [[ -e "$current_target" ]]; then
+        current_target="$(canonical_path "$current_target")"
+      fi
+      if [[ "$current_target" == "$source_path" ]]; then
+        log "Already linked ($label): $skill_name"
+        skipped_count=$((skipped_count + 1))
+        continue
+      fi
+
+      if [[ "$force" -ne 1 ]]; then
+        log "Conflict ($label): $target_path points to $current_target"
+        log "Re-run with --force to replace it."
+        exit 1
+      fi
+
+      backup_path "$target_path"
+    elif [[ -e "$target_path" ]]; then
+      if [[ "$force" -ne 1 ]]; then
+        log "Conflict ($label): $target_path already exists"
+        log "Re-run with --force to move it aside into a backup directory."
+        exit 1
+      fi
+
+      backup_path "$target_path"
     fi
-    if [[ "$current_target" == "$source_path" ]]; then
-      log "Already linked: $skill_name"
-      skipped_count=$((skipped_count + 1))
-      continue
-    fi
 
-    if [[ "$force" -ne 1 ]]; then
-      log "Conflict: $target_path points to $current_target"
-      log "Re-run with --force to replace it."
-      exit 1
-    fi
+    run ln -s "$source_path" "$target_path"
+    log "$(status_text "Linked" "Would link") ($label): $target_path -> $source_path"
+    linked_count=$((linked_count + 1))
+  done
 
-    backup_path "$target_path"
-  elif [[ -e "$target_path" ]]; then
-    if [[ "$force" -ne 1 ]]; then
-      log "Conflict: $target_path already exists"
-      log "Re-run with --force to move it aside into a backup directory."
-      exit 1
-    fi
+  log "$label: $(status_text "Linked" "Would link") $linked_count skill(s); skipped $skipped_count already-correct link(s)."
 
-    backup_path "$target_path"
+  if [[ -n "$backup_root" ]]; then
+    log "$(status_text "Backup directory" "Would use backup directory"): $backup_root"
   fi
+}
 
-  run ln -s "$source_path" "$target_path"
-  log "$(status_text "Linked" "Would link"): $target_path -> $source_path"
-  linked_count=$((linked_count + 1))
-done
+if target_selected codex; then
+  log "Codex home: $codex_home"
+  log "Codex skills dir: $skills_dir"
+  install_directory_target "Codex" "$skills_dir"
+fi
 
-log "Codex: $(status_text "Linked" "Would link") $linked_count skill(s); skipped $skipped_count already-correct link(s)."
-
-if [[ -n "$backup_root" ]]; then
-  log "$(status_text "Backup directory" "Would use backup directory"): $backup_root"
+if target_selected opencode; then
+  log "OpenCode config dir: $opencode_config_dir"
+  log "OpenCode skills dir: $opencode_skills_dir"
+  install_directory_target "OpenCode" "$opencode_skills_dir"
 fi
 
 # --- Claude Code commands ---
 
-run mkdir -p "$claude_commands_dir"
+if target_selected claude; then
+  log "Claude commands dir: $claude_commands_dir"
+  run mkdir -p "$claude_commands_dir"
 
-claude_linked_count=0
-claude_skipped_count=0
-backup_root=""
+  claude_linked_count=0
+  claude_skipped_count=0
+  backup_root=""
+  backup_parent="$claude_commands_dir"
 
-for source_dir in "${skill_dirs[@]}"; do
-  skill_md="$source_dir/SKILL.md"
-  raw_name="$(skill_name_from_frontmatter "$skill_md")"
-  if [[ -z "$raw_name" ]]; then
-    log "Warning: no name in frontmatter of $skill_md, skipping Claude command"
-    continue
-  fi
-
-  command_slug="$(slug_from_name "$raw_name")"
-  target_path="$claude_commands_dir/$command_slug.md"
-  source_path="$(canonical_path "$skill_md")"
-
-  if [[ -L "$target_path" ]]; then
-    current_target="$(resolve_link_target "$target_path")"
-    if [[ -e "$current_target" ]]; then
-      current_target="$(canonical_path "$current_target")"
-    fi
-    if [[ "$current_target" == "$source_path" ]]; then
-      log "Already linked: /$command_slug"
-      claude_skipped_count=$((claude_skipped_count + 1))
+  for source_dir in "${skill_dirs[@]}"; do
+    skill_md="$source_dir/SKILL.md"
+    raw_name="$(skill_name_from_frontmatter "$skill_md")"
+    if [[ -z "$raw_name" ]]; then
+      log "Warning: no name in frontmatter of $skill_md, skipping Claude command"
       continue
     fi
 
-    if [[ "$force" -ne 1 ]]; then
-      log "Conflict: $target_path points to $current_target"
-      log "Re-run with --force to replace it."
-      exit 1
+    command_slug="$(slug_from_name "$raw_name")"
+    target_path="$claude_commands_dir/$command_slug.md"
+    source_path="$(canonical_path "$skill_md")"
+
+    if [[ -L "$target_path" ]]; then
+      current_target="$(resolve_link_target "$target_path")"
+      if [[ -e "$current_target" ]]; then
+        current_target="$(canonical_path "$current_target")"
+      fi
+      if [[ "$current_target" == "$source_path" ]]; then
+        log "Already linked: /$command_slug"
+        claude_skipped_count=$((claude_skipped_count + 1))
+        continue
+      fi
+
+      if [[ "$force" -ne 1 ]]; then
+        log "Conflict: $target_path points to $current_target"
+        log "Re-run with --force to replace it."
+        exit 1
+      fi
+
+      backup_path "$target_path"
+    elif [[ -e "$target_path" ]]; then
+      if [[ "$force" -ne 1 ]]; then
+        log "Conflict: $target_path already exists"
+        log "Re-run with --force to move it aside into a backup directory."
+        exit 1
+      fi
+
+      backup_path "$target_path"
     fi
 
-    backup_path "$target_path"
-  elif [[ -e "$target_path" ]]; then
-    if [[ "$force" -ne 1 ]]; then
-      log "Conflict: $target_path already exists"
-      log "Re-run with --force to move it aside into a backup directory."
-      exit 1
-    fi
+    run ln -s "$source_path" "$target_path"
+    log "$(status_text "Linked" "Would link"): /$command_slug -> $source_path"
+    claude_linked_count=$((claude_linked_count + 1))
+  done
 
-    backup_path "$target_path"
+  log "Claude: $(status_text "Linked" "Would link") $claude_linked_count command(s); skipped $claude_skipped_count already-correct link(s)."
+
+  if [[ -n "$backup_root" ]]; then
+    log "$(status_text "Backup directory" "Would use backup directory"): $backup_root"
   fi
-
-  run ln -s "$source_path" "$target_path"
-  log "$(status_text "Linked" "Would link"): /$command_slug -> $source_path"
-  claude_linked_count=$((claude_linked_count + 1))
-done
-
-log "Claude: $(status_text "Linked" "Would link") $claude_linked_count command(s); skipped $claude_skipped_count already-correct link(s)."
-
-if [[ -n "$backup_root" ]]; then
-  log "$(status_text "Backup directory" "Would use backup directory"): $backup_root"
 fi
 
 log ""
