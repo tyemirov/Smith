@@ -1,35 +1,24 @@
-version: 1
-
+kind: workflow
+governance: mprlab-governor
 controller:
-  execution: "inherit"
   responsibilities:
-    - "Own user communication, live-worktree verification, local release mutations, publication side effects, and final reporting."
-    - "Do not delegate a step that changes the live release artifact, Git history, or a remote target unless same-worktree execution is guaranteed."
-
+    - Own user communication, checkout verification, release changes, publication, and final reporting.
+    - Keep publication effects in the primary agent.
 steps:
-  - id: "release-audit"
-    agent_type: "worker"
-    use_subagent_when_available: true
-    workspace: "fork-safe"
-    model: "gpt-5.3-codex-spark"
-    reasoning_effort: "low"
-    scope: "Inspect the repository lifecycle and identify the local CI gate, versioning scheme, and complete artifact inventory."
-    controller_handoff: "Verify all findings in the live worktree before preparing a release."
-
-  - id: "release-prepare"
-    agent_type: "worker"
-    use_subagent_when_available: false
-    workspace: "same-worktree"
-    model: "gpt-5.3-codex-spark"
-    reasoning_effort: "medium"
-    scope: "Run the strictly local release pipeline and finalize the hashed release artifact."
-    controller_handoff: "Keep this step inline unless the host guarantees the worker uses the live worktree."
-
-  - id: "release-publish"
-    agent_type: "worker"
-    use_subagent_when_available: false
-    workspace: "same-worktree"
-    model: "gpt-5.3-codex-spark"
-    reasoning_effort: "medium"
-    scope: "Publish and verify the exact prepared refs and payloads without rebuilding or deploying."
-    controller_handoff: "Keep all publication side effects in the controller."
+  - id: release-audit
+    role: explorer
+    execution: conditional_subagent
+    workspace: primary
+    scope: Inspect the lifecycle and identify the local CI gate, versioning scheme, and complete artifact inventory.
+    controller_handoff: Verify findings in the primary checkout before release preparation.
+  - id: release-prepare
+    role: worker
+    execution: primary_agent_with_scripts
+    workspace: primary
+    scope: Run the local release pipeline and finalize the hashed release artifact.
+  - id: release-publish
+    role: worker
+    execution: primary_agent_with_scripts
+    workspace: primary
+    scope: Publish and verify the exact prepared refs and payloads.
+    controller_handoff: Keep all publication effects in the primary agent.

@@ -25,6 +25,7 @@ The installed skills appear under the `tyemirov` plugin namespace:
 - `tyemirov:Git Release`
 - `tyemirov:simp`
 - `tyemirov:Tidy Folder`
+- `tyemirov:whip`
 
 ## Local Development
 
@@ -41,45 +42,64 @@ in the local Codex configuration.
 Use `./sync-plugins.sh --help` for options such as `--plugin-parent`,
 `--marketplace-path`, `--marketplace-name`, and `--dry-run`.
 
-For local smoke testing only, register this checkout as a local marketplace and
-install the plugin:
+## Local installation
+
+Use the single installer in the Smith repository for both collections:
 
 ```bash
-./sync-plugins.sh --install-local
+../Smith/install-skills --source ../Smith --source .
 ```
 
-To remove legacy direct Codex skill symlinks that point back to this repository
-during local cleanup:
+The installer detects supported agent commands through `PATH`.
+It reads each skill's YAML affinity declaration before installation.
+It installs only skills that permit the detected agent.
+Use `--dry-run` to inspect the operations without changes.
 
-```bash
-./sync-plugins.sh --remove-direct-skills
+Every skill must declare `deployment` in its `SKILL.md` YAML header.
+The installer reads this custom field to select agents.
+
+For all supported installed agents:
+
+```yaml
+deployment:
+  include:
+  - all
 ```
 
-### Legacy Direct Skill Symlinks
+Use `"*"` in place of `all` for the same selection. Quote the asterisk in YAML.
 
-```bash
-./install-skills.sh
+For selected agents:
+
+```yaml
+deployment:
+  include:
+  - openai
+  - muse
 ```
 
-This legacy installer links skills directly into selected local agent profiles
-from a single source:
+To exclude specific agents:
 
-- **Codex**: symlinks each skill directory into `~/.codex/skills/`
-- **Claude Code**: symlinks each `SKILL.md` into `~/.claude/commands/` as a
-  slash command (e.g., `/git-release`)
-- **OpenCode**: symlinks each skill directory into
-  `${OPENCODE_CONFIG_DIR:-~/.config/opencode}/skills/`
-
-Use `--target` to install one or more selected targets. Use
-`--opencode-config-dir` to select an OpenCode profile.
-
-For example, install only into a project-specific OpenCode profile:
-
-```bash
-./install-skills.sh --target opencode --opencode-config-dir /path/to/.opencode
+```yaml
+deployment:
+  exclude:
+  - claude
 ```
 
-Use `./install-skills.sh --help` for all options.
+The agent names are `openai`, `claude`, `opencode`, `antigravity`, and `muse`.
+`openai` selects Codex. Its command name and CLI target remain `codex`.
+Declare exactly one of `include` or `exclude` with a nonempty list of distinct names.
+`include` accepts specific names or one `all` or `"*"` entry.
+`exclude` accepts only specific names.
+Missing declarations, unknown agents, and invalid fields stop installation before target changes.
+Duplicate skill directory names across collections also stop installation.
+
+Governor owns the shared role assignments and host bindings.
+Task `agents/runtime.yaml` files reference the installed `mprlab-governor` contract.
+Install Governor with these workflows through the shared Smith installer.
+Use `--dry-run` for a preview and `--check` for a read-only drift check.
+
+`sync-plugins.sh` builds the checked-in Codex plugin package.
+It does not install skills or register a marketplace.
 
 ## Skills
 
@@ -90,6 +110,23 @@ Use `./install-skills.sh --help` for all options.
 | Git Release | `tyemirov:Git Release` | `/git-release` |
 | Simp | `tyemirov:simp` | `/simp` |
 | Tidy Folder | `tyemirov:Tidy Folder` | `/tidy-folder` |
+| [Whip](whip/README.md) | `tyemirov:whip` | `/whip` |
+
+### Whip document revisions
+
+Whip preserves approved document content through baseline comparisons and independent review.
+See [Whip](whip/README.md) for the method, examples, and reviewer setup.
+
+With an updated shared Smith checkout, install both collections and bundled Codex reviewers in one command:
+
+```bash
+../Smith/install-skills --source ../Smith --source .
+```
+
+The shared installer preserves existing skill links, unrelated skills, and controller model settings.
+It preserves identical reviewer files and stops before writes when reviewer contents conflict.
+Use `--dry-run` for a preview and `--check` for verification.
+The plugin bundle contains Whip, but its reviewer needs the setup described in the Whip README.
 
 ### Simp across hosts
 
@@ -110,9 +147,8 @@ mode examples.
 ## Skill format
 
 Each skill is a self-contained directory with a `SKILL.md` file containing YAML
-frontmatter (`name`, `description`) and the full workflow prompt. Simp keeps
-these standard fields as its complete shared frontmatter so Codex, Claude Code,
-OpenCode, Gemini CLI, and Antigravity consume the same workflow.
+frontmatter (`name`, `description`) and the full workflow prompt. Each skill declares its installer selection under `deployment`.
+The Markdown workflow remains shared across agents.
 
 Optional metadata files:
 

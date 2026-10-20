@@ -1,0 +1,4 @@
+interface:
+  display_name: "Whip"
+  short_description: "Preserve approved content through document revisions"
+  default_prompt: "Use $whip to revise this document and verify that approved facts, decisions, and citations are preserved."

@@ -1,6 +1,9 @@
 ---
 name: "Git Commit"
 description: "Turn the current Git worktree into a commit. Use when Codex should inspect the full set of introduced changes relative to the previous commit, draft a commit message with `gix message commit`, commit all tracked and untracked changes, and push when the repository has a clear remote target. Trigger for requests like \"commit this\", \"write a commit message and commit everything\", or \"commit and push the current changes.\""
+deployment:
+  include:
+  - all
 ---
 
 # Git Commit Skill
@@ -9,12 +12,13 @@ Use `$Git Commit` when the user wants a diff-based commit message, a full-tree c
 
 ## Runtime Routing
 
-If the host supports subagents with explicit `model` and `reasoning_effort`, read `agents/runtime.yaml` before running this skill.
-
-- Keep the controller in the main thread responsible for user communication, live-worktree verification, and final reporting.
-- Delegate only steps whose `workspace` requirement the host can satisfy.
-- In hosts where subagents run in forked workspaces, only delegate `fork-safe` steps. Run `same-worktree` steps such as staging, committing, and pushing inline in the controller.
-- If subagents or model controls are unavailable, run the full workflow inline and preserve the same guardrails.
+Read [agents/runtime.yaml](agents/runtime.yaml) and the installed `mprlab-governor` runtime contract before role selection.
+Resolve the shared contract through the host's governance receipt or the installed Governor skill.
+Use the shared host bindings for every delegated role.
+Keep task authority and final reporting in the primary agent.
+Use the primary checkout for every step. Execute mutations in the primary agent unless a worker uses that same checkout.
+Keep release publication in the primary agent.
+Apply the shared architect checkpoints and record actual independent review evidence.
 
 ## Preconditions
 

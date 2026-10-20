@@ -14,12 +14,11 @@ codex_home="${CODEX_HOME:-$HOME/.codex}"
 codex_skills_dir="$codex_home/skills"
 python_cmd="${PYTHON:-python3}"
 dry_run=0
-install_local=0
 remove_direct_skills=0
 
 usage() {
   cat <<'EOF'
-Usage: sync-plugins.sh [--plugin-parent PATH] [--plugin-name NAME] [--plugin-display-name NAME] [--marketplace-path PATH] [--marketplace-name NAME] [--marketplace-display-name NAME] [--codex-home PATH] [--dry-run] [--install-local] [--remove-direct-skills]
+Usage: sync-plugins.sh [--plugin-parent PATH] [--plugin-name NAME] [--plugin-display-name NAME] [--marketplace-path PATH] [--marketplace-name NAME] [--marketplace-display-name NAME] [--codex-home PATH] [--dry-run] [--remove-direct-skills]
 
 Regenerate this repository's checked-in Codex plugin bundle and marketplace.
 
@@ -41,7 +40,6 @@ Options:
                             Marketplace display name written to marketplace.json.
   --codex-home PATH         Codex home used when removing old direct skill links.
   --dry-run                 Show planned filesystem and Codex operations.
-  --install-local           Register this local checkout as a marketplace and install plugins.
   --remove-direct-skills    Remove old ~/.codex/skills symlinks that point at this repo.
   -h, --help                Show this help.
 EOF
@@ -146,10 +144,6 @@ while [[ $# -gt 0 ]]; do
       dry_run=1
       shift
       ;;
-    --install-local)
-      install_local=1
-      shift
-      ;;
     --remove-direct-skills)
       remove_direct_skills=1
       shift
@@ -172,6 +166,7 @@ gitcommit
 gitrelease
 simp
 tidy-folder
+whip
 EOF
 )"
 
@@ -258,7 +253,7 @@ payload = {
         "shortDescription": "Personal Codex skill bundle",
         "longDescription": (
             "A personal Codex plugin bundle containing Email Cleanup, "
-            "Git Commit, Git Release, Simp, and Tidy Folder skills."
+            "Git Commit, Git Release, Simp, Tidy Folder, and Whip skills."
         ),
         "developerName": "Tyemirov",
         "category": category,
@@ -271,6 +266,7 @@ payload = {
             "Use Tyemirov skills to clean up Gmail safely.",
             "Use Simp to audit a repository for forward-only simplifications.",
             "Use Tyemirov skills to organize a folder.",
+            "Use Whip to revise a document and verify that approved content is preserved.",
         ],
     },
 }
@@ -341,36 +337,5 @@ if [[ "$remove_direct_skills" -eq 1 ]]; then
   done <<< "$skill_specs"
 fi
 
-if [[ "$install_local" -eq 1 ]]; then
-  if [[ "$dry_run" -eq 1 ]]; then
-    for stale_plugin_name in "${legacy_plugin_names[@]}"; do
-      [[ "$stale_plugin_name" == "$plugin_name" ]] && continue
-      log "[dry-run] remove stale local plugin install $stale_plugin_name@$marketplace_name"
-    done
-    log "[dry-run] replace local marketplace source for $marketplace_name"
-    log "[dry-run] install plugin with codex plugin add $plugin_name@$marketplace_name"
-  else
-    marketplace_name="$("$python_cmd" - "$marketplace_path" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1]).expanduser()
-payload = json.loads(path.read_text(encoding="utf-8"))
-print(payload["name"])
-PY
-)"
-    marketplace_dir="$(cd -- "$(dirname -- "$marketplace_path")" && pwd)"
-    marketplace_root="$(cd -- "$marketplace_dir/../.." && pwd)"
-    for stale_plugin_name in "${legacy_plugin_names[@]}"; do
-      [[ "$stale_plugin_name" == "$plugin_name" ]] && continue
-      codex plugin remove "$stale_plugin_name@$marketplace_name" >/dev/null 2>&1 || true
-    done
-    codex plugin remove "$plugin_name@$marketplace_name" >/dev/null 2>&1 || true
-    codex plugin marketplace remove "$marketplace_name" >/dev/null 2>&1 || true
-    run codex plugin marketplace add "$marketplace_root"
-    run codex plugin add "$plugin_name@$marketplace_name"
-  fi
-fi
 
 log "Done."

@@ -1,6 +1,9 @@
 ---
 name: "Git Release"
 description: "Use when preparing or publishing a repository release under the strict release -> publish -> deploy lifecycle: release is local-only artifact preparation, publish exposes the exact prepared artifacts to GitHub, registries, or stores, and deploy is a separate activation step."
+deployment:
+  include:
+  - all
 ---
 
 # Git Release Skill
@@ -17,9 +20,13 @@ old lifecycle.
 
 ## Runtime Routing
 
-Read `agents/runtime.yaml` when the host supports subagents. Keep all live-worktree
-edits, local tags, commits, pushes, and publication operations in the controller
-unless the host guarantees same-worktree execution.
+Read [agents/runtime.yaml](agents/runtime.yaml) and the installed `mprlab-governor` runtime contract before role selection.
+Resolve the shared contract through the host's governance receipt or the installed Governor skill.
+Use the shared host bindings for every delegated role.
+Keep task authority and final reporting in the primary agent.
+Use the primary checkout for every step. Execute mutations in the primary agent unless a worker uses that same checkout.
+Keep release publication in the primary agent.
+Apply the shared architect checkpoints and record actual independent review evidence.
 
 ## Bundled Commands
 

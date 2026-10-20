@@ -2,6 +2,9 @@
 name: "tidy-folder"
 description: |
   Organize a specified folder by subject, project, and user lookup behavior. Use for folder cleanup, hierarchy proposals, and taxonomy reviews. Preserve meaningful groups and reversible file operations.
+deployment:
+  include:
+  - all
 ---
 
 # Tidy Folder
@@ -10,7 +13,9 @@ description: |
 
 - For a review or proposal, inspect only the specified inputs. Keep the target unchanged.
 - For file operations, require an explicit target folder and user authorization for the requested operation.
-- Before a file operation, read [agents/runtime.yaml](agents/runtime.yaml) for role assignments and model checks.
+- Before a file operation, read [agents/runtime.yaml](agents/runtime.yaml) for task roles and execution methods.
+- Read the installed `mprlab-governor` runtime contract for shared host bindings and architect checkpoints.
+- Resolve the shared source through the host's governance receipt or the installed Governor skill.
 - For an execution plan, read the same routing file before you assign roles.
 - Resolve script paths relative to this skill directory. The examples below run from this directory.
 

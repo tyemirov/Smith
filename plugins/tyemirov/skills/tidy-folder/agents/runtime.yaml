@@ -1,22 +1,14 @@
-# Agent-read routing contract. This is not native Codex configuration.
-# The Python controller does not parse this file or start subagents.
-model_review:
-  reviewed_on: "2026-09-05"
-  availability_source: "Active host subagent tool schema"
-  guidance_source: "https://learn.chatgpt.com/docs/agent-configuration/subagents"
-  maintenance: "Before distribution, verify the exact model IDs and reasoning levels against the destination host."
-
+kind: workflow
+governance: mprlab-governor
 controller:
-  execution: "inherit"
   responsibilities:
-    - "Keep the Supervisor and Router roles in the primary agent."
-    - "Use deterministic helpers for snapshots, moves, restore, and final inventory checks."
-    - "Own the run lock, artifact writes, placement decisions, and final report."
-    - "Apply the hierarchy comparison before moves."
-    - "Treat helper role records as mechanical results, not independent review evidence."
+    - Keep Supervisor and Router responsibilities in the primary agent.
+    - Use deterministic helpers for snapshots, moves, restore, and inventory checks.
+    - Own the run lock, artifact writes, placement decisions, and final report.
+    - Apply the hierarchy comparison before moves.
+    - Treat helper role records as mechanical results, not independent review evidence.
 
 delegation:
-  scope: "Read-only evidence collection and independent review"
   selection:
     - "Use one agent for small, clear tasks."
     - "Delegate disjoint evidence scans when parallel work has a useful benefit."
@@ -24,7 +16,7 @@ delegation:
     - "Keep target mutations and shared run artifacts under one owner."
   capability_check:
     - "Before delegation, inspect the active tool's supported model IDs and reasoning levels."
-    - "Use the assignments below only when the host supports each exact pair."
+    - "Use the installed shared host assignments only when the host supports each exact pair."
     - "If an assignment is unavailable, report the role, requested pair, and available options."
     - "Keep that delegation blocked until the user selects a supported assignment or explicitly selects single-agent execution."
     - "Continue independent read-only work while a required review is blocked. Keep all moves blocked."
@@ -41,28 +33,38 @@ delegation:
     - "Record the role, execution method, requested model, requested reasoning, and model availability evidence."
     - "For a spawned agent, record its returned identifier and the actual model and reasoning when exposed."
     - "When actual model metadata is absent, record it as unverified. A request alone does not prove the selected model."
-    - "Keep all model assignments in this file. Recheck them before delegation and distribution."
+    - "Keep all assignments in the shared Governor contract. Recheck them before delegation and distribution."
 
 steps:
-  - id: "tidy-folder-preflight"
-    execution: "primary_agent_with_scripts"
-    scope: "Establish the target, snapshot, and run lock."
-  - id: "tidy-folder-scout"
-    execution: "conditional_subagent"
-    model: "gpt-5.6-terra"
-    reasoning_effort: "medium"
-    scope: "Inspect assigned paths. Return raw evidence, candidate groups, and unresolved questions."
-  - id: "tidy-folder-router"
-    execution: "primary_agent"
-    scope: "Select destinations. Compare root alternatives and record the chosen hierarchy."
-  - id: "tidy-folder-gatekeeper"
-    execution: "conditional_subagent"
-    model: "gpt-5.6-sol"
-    reasoning_effort: "high"
-    scope: "Review raw evidence and proposed actions against the skill's gates. Return specific failures or a clear result."
-  - id: "tidy-folder-executor"
-    execution: "primary_agent_with_scripts"
-    scope: "Apply only reviewed actions. Preserve project internals, the lock, the move ledger, and reversible cleanup."
-  - id: "tidy-folder-audit-and-report"
-    execution: "primary_agent_with_scripts"
-    scope: "Verify the final inventory and report actual outcomes, review method, and unresolved limits."
+  - id: tidy-folder-preflight
+    role: worker
+    execution: primary_agent_with_scripts
+    workspace: primary
+    scope: Establish the target, snapshot, and run lock.
+  - id: tidy-folder-scout
+    role: explorer
+    execution: conditional_subagent
+    workspace: primary
+    scope: Inspect assigned paths. Return evidence, candidate groups, and unresolved questions.
+  - id: tidy-folder-router
+    role: worker
+    execution: primary_agent
+    workspace: primary
+    scope: Select destinations. Compare root alternatives and record the chosen hierarchy.
+  - id: tidy-folder-gatekeeper
+    role: architect
+    execution: conditional_subagent
+    workspace: primary
+    required_review: true
+    review_condition: Ambiguous placements, sensitive groups, or removal candidates require independent review.
+    scope: Review raw evidence and proposed actions against the task gates. Return specific findings or a clear result.
+  - id: tidy-folder-executor
+    role: worker
+    execution: primary_agent_with_scripts
+    workspace: primary
+    scope: Apply reviewed actions. Preserve project internals, the lock, the move ledger, and reversible cleanup.
+  - id: tidy-folder-audit-and-report
+    role: worker
+    execution: primary_agent_with_scripts
+    workspace: primary
+    scope: Verify the inventory and report outcomes, review method, and unresolved limits.

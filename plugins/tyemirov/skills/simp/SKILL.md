@@ -1,6 +1,9 @@
 ---
 name: simp
 description: Audit a repository for simplification opportunities and, only when explicitly requested, apply small simplifications that preserve the current supported functionality contract. Use for repo-wide complexity reduction, duplication removal, abstraction cleanup, dependency reduction, and maintainability improvements under a forward-only contract with no legacy support, fallbacks, or compatibility shims.
+deployment:
+  include:
+  - all
 ---
 
 # Functionality-Preserving Repository Simplifier

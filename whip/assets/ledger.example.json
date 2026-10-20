@@ -1,0 +1,38 @@
+{
+  "approved_sha256": "",
+  "session_sha256": "",
+  "source": {
+    "approved_version": "approved version URL or commit",
+    "session_version": "session-start version URL or commit"
+  },
+  "invariants": [
+    {
+      "id": "F-001",
+      "kind": "fact",
+      "statement": "The draft states that the annual target is $400,000.",
+      "priority": "critical",
+      "source_anchor": "approved.md#Goals; original phrase: '$400,000 annually'",
+      "required_literals": ["$400,000"],
+      "authorized_change_id": null
+    },
+    {
+      "id": "D-001",
+      "kind": "decision",
+      "statement": "Initial customers are enterprise teams.",
+      "priority": "high",
+      "source_anchor": "approved.md#Customers",
+      "required_literals": [],
+      "authorized_change_id": null
+    }
+  ],
+  "protected_sections": [
+    {"heading": "## Goals", "reason": "Outside authorized change scope"}
+  ],
+  "authorized_changes": [
+    {
+      "id": "CH-001",
+      "description": "Reorganize the technical architecture discussion without changing product decisions.",
+      "locations": ["## Architecture"]
+    }
+  ]
+}

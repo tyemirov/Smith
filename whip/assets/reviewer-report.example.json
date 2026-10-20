@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "review_completed": true,
+  "verdict": "PASS",
+  "baseline_refs": {
+    "approved": "approved.md#sha256:EXAMPLE",
+    "session": "session.md#sha256:EXAMPLE",
+    "candidate": "candidate.md#sha256:EXAMPLE"
+  },
+  "ledger_reviews": [
+    {
+      "id": "F-001",
+      "status": "preserved",
+      "source_anchor": "approved.md#Goals",
+      "source_quote": "$400,000 annually",
+      "candidate_anchor": "candidate.md#Goals",
+      "candidate_quote": "$400,000 annually",
+      "authorized_change_id": null,
+      "reasoning": "Annual amount and currency are retained"
+    },
+    {
+      "id": "D-001",
+      "status": "rephrased-equivalent",
+      "source_anchor": "approved.md#Customers",
+      "source_quote": "Initial customers are enterprise teams",
+      "candidate_anchor": "candidate.md#Customers",
+      "candidate_quote": "We will start with enterprise teams",
+      "authorized_change_id": null,
+      "reasoning": "Customer segment and initial scope remain unchanged"
+    }
+  ],
+  "unmapped_baseline_units": [],
+  "unreviewed_new_claims": [],
+  "citation_issues": [],
+  "findings": [],
+  "limitations": [],
+  "warning_dispositions": [
+    {
+      "code": "SEMANTIC_REVIEW_REQUIRED",
+      "reason": "Independent review confirmed semantic preservation with source-anchored ledger evidence."
+    }
+  ]
+}
