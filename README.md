@@ -1,7 +1,18 @@
 # Smith
 
-Custom agent skills. Simp uses one portable workflow across Codex, Claude Code,
-OpenCode, Gemini CLI, and Antigravity.
+Custom agent skills for code, documents, email, and file organization.
+
+## Skills
+
+| Skill | What it does and when to use it | Codex | Claude Code |
+|---|---|---|---|
+| [Email Cleanup](email-cleanup/README.md) | Review and sort a crowded Gmail mailbox while protecting important records and active conversations. | `tyemirov:Email Cleanup` | `/email-cleanup` |
+| [Git Commit](gitcommit/README.md) | Validate repository changes, generate a commit message, and commit or push when the work is ready. | `tyemirov:Git Commit` | `/git-commit` |
+| [Git Release](gitrelease/README.md) | Prepare and publish verified artifacts when a repository is ready for release. | `tyemirov:Git Release` | `/git-release` |
+| [Simp](simp/README.md) | Audit or simplify complex code while preserving current supported functionality. | `tyemirov:simp` | `/simp` |
+| [Tidy Folder](tidy-folder/README.md) | Organize cluttered folders by subject or project so files are easier to find. | `tyemirov:Tidy Folder` | `/tidy-folder` |
+| [Whip](whip/README.md) | Revise or restructure documents while preserving approved facts, decisions, and citations. | `tyemirov:whip` | `/whip` |
+| [Agent Runtime](agent-runtime/README.md) | Supply shared roles and host configuration when skills need delegation or independent review. | `tyemirov:agent-runtime` | `/agent-runtime` |
 
 ## Codex Plugin Marketplace
 
@@ -122,17 +133,7 @@ Use `--dry-run` for a preview and `--check` for a read-only drift check.
 `sync-plugins.sh` builds the checked-in Codex plugin package.
 It does not install skills or register a marketplace.
 
-## Skills
-
-| Skill | Codex | Claude Code |
-|---|---|---|
-| [Email Cleanup](email-cleanup/README.md) | `tyemirov:Email Cleanup` | `/email-cleanup` |
-| [Git Commit](gitcommit/README.md) | `tyemirov:Git Commit` | `/git-commit` |
-| [Git Release](gitrelease/README.md) | `tyemirov:Git Release` | `/git-release` |
-| [Simp](simp/README.md) | `tyemirov:simp` | `/simp` |
-| [Tidy Folder](tidy-folder/README.md) | `tyemirov:Tidy Folder` | `/tidy-folder` |
-| [Whip](whip/README.md) | `tyemirov:whip` | `/whip` |
-| [Agent Runtime](agent-runtime/README.md) | `tyemirov:agent-runtime` | `/agent-runtime` |
+## Usage examples
 
 ### Whip document revisions
 
