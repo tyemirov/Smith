@@ -9,6 +9,12 @@ writes, downgrade paths, or compatibility shims.
 
 ## Install
 
+From the collection root, install Simp with this command:
+
+```bash
+./install-skills --skill simp
+```
+
 Keep `simp/` as the canonical source. Link or copy that complete directory to
 the current discovery path for each host:
 
@@ -26,10 +32,10 @@ This repository also distributes Simp through the `tyemirov` Codex plugin.
 
 ## Portable contract
 
-The shared `SKILL.md` uses only the portable `name` and `description`
-frontmatter fields. The complete workflow, references, and template are
-host-neutral. Codex-specific UI and invocation policy live in
-`agents/openai.yaml`; no other host adapter is required.
+The shared `SKILL.md` declares `name`, `description`, and `deployment` in its YAML header.
+The collection installer uses `deployment` to select permitted hosts.
+The complete workflow, references, and template are host-neutral. The `agents/openai.yaml` file contains Codex UI metadata and invocation policy.
+The other hosts use the shared workflow.
 
 Implicit activation is safe: `audit` is the default and cannot modify the
 repository. The skill enters `apply` mode only when the user explicitly selects

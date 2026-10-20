@@ -126,12 +126,13 @@ It does not install skills or register a marketplace.
 
 | Skill | Codex | Claude Code |
 |---|---|---|
-| Email Cleanup | `tyemirov:Email Cleanup` | `/email-cleanup` |
-| Git Commit | `tyemirov:Git Commit` | `/git-commit` |
-| Git Release | `tyemirov:Git Release` | `/git-release` |
-| Simp | `tyemirov:simp` | `/simp` |
-| Tidy Folder | `tyemirov:Tidy Folder` | `/tidy-folder` |
+| [Email Cleanup](email-cleanup/README.md) | `tyemirov:Email Cleanup` | `/email-cleanup` |
+| [Git Commit](gitcommit/README.md) | `tyemirov:Git Commit` | `/git-commit` |
+| [Git Release](gitrelease/README.md) | `tyemirov:Git Release` | `/git-release` |
+| [Simp](simp/README.md) | `tyemirov:simp` | `/simp` |
+| [Tidy Folder](tidy-folder/README.md) | `tyemirov:Tidy Folder` | `/tidy-folder` |
 | [Whip](whip/README.md) | `tyemirov:whip` | `/whip` |
+| [Agent Runtime](agent-runtime/README.md) | `tyemirov:agent-runtime` | `/agent-runtime` |
 
 ### Whip document revisions
 
