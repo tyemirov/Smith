@@ -69,7 +69,7 @@ def runtime_source(tmp_path: Path) -> Path:
 def run_install(tmp_path: Path, source: Path, *extra: str) -> subprocess.CompletedProcess[str]:
     commands = tmp_path / "commands"
     commands.mkdir(parents=True, exist_ok=True)
-    for name in ("codex", "claude", "opencode", "antigravity", "muse"):
+    for name in ("codex", "claude", "opencode", "agy", "muse"):
         command = commands / name
         if not command.exists():
             command.symlink_to("/usr/bin/true")

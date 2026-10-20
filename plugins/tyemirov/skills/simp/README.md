@@ -1,6 +1,6 @@
 # Simp
 
-A portable Codex, Claude Code, Gemini CLI, and Antigravity skill for repository
+A portable Codex, Claude Code, Antigravity CLI, and Antigravity App skill for repository
 simplification under a forward-only current-functionality contract.
 
 Simp preserves current supported functionality. It does not preserve deprecated
@@ -22,11 +22,13 @@ the current discovery path for each host:
 |---|---|---|
 | Codex | `.agents/skills/simp/` | `~/.agents/skills/simp/` |
 | Claude Code | `.claude/skills/simp/` | `~/.claude/skills/simp/` |
-| Gemini CLI | `.agents/skills/simp/` | `~/.agents/skills/simp/` |
-| Antigravity | `.agents/skills/simp/` | `~/.gemini/config/skills/simp/` |
+| Antigravity CLI (`agy`) | `.agents/skills/simp/` | `~/.gemini/antigravity-cli/skills/simp/` |
+| Antigravity App (desktop) | `.agents/skills/simp/` | `~/.gemini/config/skills/simp/` |
 
-Codex and Gemini CLI deliberately share the open `.agents/skills` location.
-Antigravity uses the same project location and its current global location.
+Antigravity CLI and the desktop app share the project location but use different global directories.
+The installer target `antigravity` requires `agy` and installs CLI skills.
+For the desktop app, link or copy the skill to its listed directory.
+See the [official skill paths](https://antigravity.google/docs/skills).
 
 This repository also distributes Simp through the `tyemirov` Codex plugin.
 
@@ -59,7 +61,15 @@ Claude Code:
 /simp apply pkg/parser
 ```
 
-Gemini CLI or Antigravity:
+Antigravity CLI (`agy`):
+
+```text
+/simp audit repo
+/simp annotate internal/payments
+/simp apply pkg/parser
+```
+
+Antigravity App (desktop):
 
 ```text
 Use the simp skill to audit this repository.

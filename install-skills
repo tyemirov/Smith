@@ -32,6 +32,8 @@ from typing import Callable
 
 SUPPORTED_TARGETS = ("codex", "claude", "opencode", "antigravity", "muse", "bin")
 SKILL_TARGETS = frozenset(SUPPORTED_TARGETS) - {"bin"}
+AGENT_COMMANDS = {"codex": "codex", "claude": "claude", "opencode": "opencode", "antigravity": "agy", "muse": "muse"}
+SKILL_PREFIXES = {"codex": "skills", "claude": "commands", "opencode": "skills", "antigravity": "antigravity-cli/skills", "muse": "skills"}
 INSTALL_METADATA = Path("agents/install.toml")
 DEPLOYMENT_AGENTS = {"openai": "codex", "claude": "claude", "opencode": "opencode", "antigravity": "antigravity", "muse": "muse"}
 DEPLOYMENT_WILDCARDS = frozenset({"all", "*"})
@@ -595,9 +597,8 @@ def atomic_write(path: Path, content: bytes) -> None:
 
 
 def preflight_links(skills: list[SkillSource], roots: dict[str, Path], force: bool) -> None:
-    prefixes = {"codex": "skills", "claude": "commands", "opencode": "skills", "antigravity": "config/skills"}
     for target, root in roots.items():
-        if target not in prefixes:
+        if target == "muse":
             continue
         names: set[str] = set()
         for skill in skills:
@@ -613,7 +614,7 @@ def preflight_links(skills: list[SkillSource], roots: dict[str, Path], force: bo
             if name in names:
                 raise SystemExit(f"Conflicting skill names for {target}: {name}")
             names.add(name)
-            path = root / prefixes[target] / name
+            path = root / SKILL_PREFIXES[target] / name
             if path.is_symlink() and path.resolve() == source.resolve():
                 continue
             if (path.exists() or path.is_symlink()) and not force:
@@ -648,7 +649,6 @@ def preflight_muse(skills: list[SkillSource], root: Path, force: bool) -> None:
 
 def check_links(skills: list[SkillSource], roots: dict[str, Path]) -> bool:
     drift = False
-    prefixes = {"codex": "skills", "claude": "commands", "opencode": "skills", "antigravity": "config/skills", "muse": "skills"}
     for target, root in roots.items():
         for skill in skills:
             if target not in skill.targets:
@@ -658,7 +658,7 @@ def check_links(skills: list[SkillSource], roots: dict[str, Path]) -> bool:
                 expected = skill.directory / "SKILL.md"
             else:
                 name, expected = skill.directory.name, skill.directory
-            path = root / prefixes[target] / name
+            path = root / SKILL_PREFIXES[target] / name
             if target == "muse":
                 if path.is_dir():
                     expected_files = {relative: source.read_bytes() for source, relative in muse_package_files(skill.directory)}
@@ -989,22 +989,22 @@ def main() -> int:
     # Validate source metadata before creating any installation paths.
     skills = runtime_dependencies([read_skill_source(directory) for directory in skill_dirs], available)
     binaries = binary_sources(roots)
-    installed = {target for target in SKILL_TARGETS if shutil.which(target)}
+    installed = {target for target, command in AGENT_COMMANDS.items() if shutil.which(command)}
     if args.target:
         targets = set(args.target)
         missing = targets - installed - {"bin"}
         if missing:
-            raise SystemExit(f"Agent not installed on PATH: {', '.join(sorted(missing))}")
+            raise SystemExit(f"Agent not installed on PATH: {', '.join(AGENT_COMMANDS[target] for target in sorted(missing))}")
     else:
         targets = installed | ({"bin"} if installed and not args.skill else set())
     if not targets:
         log("No supported agents installed on PATH. No changes.")
         return 0
 
-    codex_skills_dir = args.codex_home / "skills"
-    claude_commands_dir = args.claude_home / "commands"
-    opencode_skills_dir = args.opencode_config_dir / "skills"
-    antigravity_skills_dir = args.antigravity_home / "config" / "skills"
+    codex_skills_dir = args.codex_home / SKILL_PREFIXES["codex"]
+    claude_commands_dir = args.claude_home / SKILL_PREFIXES["claude"]
+    opencode_skills_dir = args.opencode_config_dir / SKILL_PREFIXES["opencode"]
+    antigravity_skills_dir = args.antigravity_home / SKILL_PREFIXES["antigravity"]
 
     log(f"Sources: {', '.join(str(root) for root in roots)}")
     log(f"Targets: {', '.join(target for target in SUPPORTED_TARGETS if target in targets)}")

@@ -65,8 +65,14 @@ It performs no per-skill model substitution.
 | Codex | `agents/mpr-*.toml` | Preserved controller, Sol worker, Luna explorer and researcher, Astra architect | Marked section in `AGENTS.md` |
 | Claude Code | `agents/mpr-*.md` | Inherited model. Medium role effort and high architect effort | Marked section in `CLAUDE.md` |
 | OpenCode | `agents/mpr-*.md` | Inherit the current model and effort | Marked section in `AGENTS.md` |
-| Antigravity | `config/agents/mpr-*.md` | Inherit the current model and effort | Marked section in `GEMINI.md` |
+| Antigravity CLI (`agy`) | `config/agents/mpr-*.md` | Inherit the current model and effort | Marked section in `GEMINI.md` |
 | Muse | `governance/mprlab-governor.json` | Agent-read catalog with inherited model assignments | Agent Runtime and dependent task instructions |
+
+The `antigravity` target detects the `agy` executable.
+It installs CLI skills under `~/.gemini/antigravity-cli/skills/`.
+The Antigravity App uses `~/.gemini/config/skills/` for desktop skills.
+Both surfaces use `~/.gemini/config/agents/` and the shared global rules.
+The installer preserves existing desktop skills and controller model settings.
 
 Muse's catalog requires the agent to read and apply the contract.
 It does not register native persistent agents.
@@ -105,6 +111,7 @@ Inspect them separately and report their effect before model acceptance.
 - [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference)
 - [Claude Code subagents](https://code.claude.com/docs/en/sub-agents)
 - [OpenCode agents](https://opencode.ai/docs/agents/)
+- [Antigravity skills](https://antigravity.google/docs/skills)
 - [Antigravity subagents](https://antigravity.google/docs/subagents)
 - [Antigravity rules](https://antigravity.google/docs/rules)
 

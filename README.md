@@ -119,6 +119,7 @@ deployment:
 
 The agent names are `openai`, `claude`, `opencode`, `antigravity`, and `muse`.
 `openai` selects Codex. Its command name and CLI target remain `codex`.
+`antigravity` selects Antigravity CLI, whose executable is `agy`.
 Declare exactly one of `include` or `exclude` with a nonempty list of distinct names.
 `include` accepts specific names or one `all` or `"*"` entry.
 `exclude` accepts only specific names.
@@ -132,6 +133,25 @@ Use `--dry-run` for a preview and `--check` for a read-only drift check.
 
 `sync-plugins.sh` builds the checked-in Codex plugin package.
 It does not install skills or register a marketplace.
+
+## Antigravity CLI
+
+[Antigravity CLI](https://antigravity.google/docs/getting-started?tab=cli) runs through the `agy` executable.
+The Antigravity App is a separate desktop application.
+Install all permitted skills and shared roles for the CLI:
+
+```bash
+./install-skills --target antigravity
+./install-skills --target antigravity --check
+```
+
+The installer requires `agy` on `PATH` and uses `~/.gemini/antigravity-cli/skills/` for CLI skills.
+`--antigravity-home` or `ANTIGRAVITY_HOME` changes the `.gemini` root, not the skills subdirectory.
+The desktop app uses `~/.gemini/config/skills/` for global skills.
+Existing desktop skills and model settings remain unchanged.
+The installer adds shared roles under `~/.gemini/config/agents/` and a marked section in `~/.gemini/GEMINI.md`.
+These role and rule locations are shared across Antigravity surfaces.
+See Google's [skills](https://antigravity.google/docs/skills), [subagents](https://antigravity.google/docs/subagents), and [rules](https://antigravity.google/docs/rules) documentation.
 
 ## Usage examples
 
@@ -161,8 +181,8 @@ workflow:
 | Codex | `$simp audit repo` | `~/.agents/skills/simp/` |
 | Claude Code | `/simp audit repo` | `~/.claude/skills/simp/` |
 | OpenCode | `Use the simp skill to audit this repository.` | `~/.config/opencode/skills/simp/` |
-| Gemini CLI | `Use the simp skill to audit this repository.` | `~/.agents/skills/simp/` |
-| Antigravity | `Use the simp skill to audit this repository.` | `~/.gemini/config/skills/simp/` |
+| Antigravity CLI (`agy`) | `/simp audit repo` | `~/.gemini/antigravity-cli/skills/simp/` |
+| Antigravity App (desktop, manual installation) | `Use the simp skill to audit this repository.` | `~/.gemini/config/skills/simp/` |
 
 See [`simp/README.md`](simp/README.md) for project-scoped locations and apply
 mode examples.
