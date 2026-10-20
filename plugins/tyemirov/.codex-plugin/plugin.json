@@ -1,15 +1,15 @@
 {
   "name": "tyemirov",
   "version": "0.1.0",
-  "description": "Personal Codex skill bundle for Tyemirov workflows.",
+  "description": "Smith: seven agent skills for code review, Git workflows, document regression checks, Gmail cleanup, and file organization.",
   "author": {
     "name": "Tyemirov"
   },
   "skills": "./skills/",
   "interface": {
-    "displayName": "Tyemirov",
-    "shortDescription": "Personal Codex skill bundle",
-    "longDescription": "A personal Codex plugin bundle containing Email Cleanup, Git Commit, Git Release, Simp, Tidy Folder, Whip, and Agent Runtime skills.",
+    "displayName": "Smith",
+    "shortDescription": "Skills for code, documents, email, and files",
+    "longDescription": "Smith includes Email Cleanup, Git Commit, Git Release, Simp, Tidy Folder, Whip, and Agent Runtime skills.",
     "developerName": "Tyemirov",
     "category": "Productivity",
     "capabilities": [

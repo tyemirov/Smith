@@ -6,9 +6,9 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 plugin_parent="${PLUGIN_PARENT:-$repo_root/plugins}"
 marketplace_path="${MARKETPLACE_PATH:-$repo_root/.agents/plugins/marketplace.json}"
 marketplace_name="${MARKETPLACE_NAME:-agent-skills}"
-marketplace_display_name="${MARKETPLACE_DISPLAY_NAME:-Agent Skills}"
+marketplace_display_name="${MARKETPLACE_DISPLAY_NAME:-Smith Skills}"
 plugin_name="${PLUGIN_NAME:-tyemirov}"
-plugin_display_name="${PLUGIN_DISPLAY_NAME:-Tyemirov}"
+plugin_display_name="${PLUGIN_DISPLAY_NAME:-Smith}"
 plugin_category="${PLUGIN_CATEGORY:-Productivity}"
 codex_home="${CODEX_HOME:-$HOME/.codex}"
 codex_skills_dir="$codex_home/skills"
@@ -244,16 +244,16 @@ manifest_path, plugin_name, plugin_display_name, category = sys.argv[1:]
 payload = {
     "name": plugin_name,
     "version": "0.1.0",
-    "description": "Personal Codex skill bundle for Tyemirov workflows.",
+    "description": "Smith: seven agent skills for code review, Git workflows, document regression checks, Gmail cleanup, and file organization.",
     "author": {
         "name": "Tyemirov",
     },
     "skills": "./skills/",
     "interface": {
         "displayName": plugin_display_name,
-        "shortDescription": "Personal Codex skill bundle",
+        "shortDescription": "Skills for code, documents, email, and files",
         "longDescription": (
-            "A personal Codex plugin bundle containing Email Cleanup, "
+            "Smith includes Email Cleanup, "
             "Git Commit, Git Release, Simp, Tidy Folder, Whip, and Agent Runtime skills."
         ),
         "developerName": "Tyemirov",

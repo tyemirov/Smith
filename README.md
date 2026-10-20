@@ -1,6 +1,7 @@
 # Smith
 
-Custom agent skills for code, documents, email, and file organization.
+Smith provides seven agent skills for Codex, Claude Code, and Antigravity CLI.
+Use them for code review, Git workflows, document regression checks, Gmail cleanup, and file organization.
 
 ## Skills
 
@@ -22,12 +23,16 @@ from the checked-in marketplace and plugin package layout:
 - `./.agents/plugins/marketplace.json`
 - `./plugins/tyemirov`
 
-After this repository is published, install the marketplace from GitHub:
+Install the Smith marketplace from GitHub:
 
 ```bash
 codex plugin marketplace add tyemirov/Smith --ref master
 codex plugin add tyemirov@agent-skills
 ```
+
+The plugin display name is **Smith**. Its stable identifier and skill namespace are `tyemirov`.
+This GitHub marketplace is separate from the universal public plugin directory.
+Directory publication requires [submission and approval](https://developers.openai.com/plugins/deploy/submission).
 
 The installed skills appear under the `tyemirov` plugin namespace:
 
