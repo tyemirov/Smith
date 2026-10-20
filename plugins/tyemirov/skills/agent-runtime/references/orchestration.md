@@ -38,8 +38,8 @@ For a later workflow install, the host's `.governance/mprlab-governor.json` rece
 Keep that source available at its installed path.
 
 ```bash
-uv run --script install-skills --dry-run
-uv run --script install-skills --check
+./install-skills --dry-run
+./install-skills --check
 ```
 
 `--dry-run` shows governance diffs and planned skill operations.

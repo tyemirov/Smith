@@ -33,7 +33,7 @@ def environment(tmp_path: Path, commands: tuple[str, ...]) -> dict[str, str]:
 
 def invoke(tmp_path: Path, env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["uv", "run", "--script", str(INSTALLER), "--codex-home", str(tmp_path / "codex"),
+        [str(INSTALLER), "--codex-home", str(tmp_path / "codex"),
          "--claude-home", str(tmp_path / "claude"),
          "--opencode-config-dir", str(tmp_path / "opencode"),
          "--antigravity-home", str(tmp_path / "antigravity"),

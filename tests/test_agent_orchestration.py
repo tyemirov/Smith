@@ -74,7 +74,7 @@ def run_install(tmp_path: Path, source: Path, *extra: str) -> subprocess.Complet
         if not command.exists():
             command.symlink_to("/usr/bin/true")
     return subprocess.run(
-        ["uv", "run", "--script", str(INSTALLER), "--source", str(source),
+        [str(INSTALLER), "--source", str(source),
          "--codex-home", str(tmp_path / "codex"),
          "--claude-home", str(tmp_path / "claude"),
          "--opencode-config-dir", str(tmp_path / "opencode"),

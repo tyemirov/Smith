@@ -98,7 +98,7 @@ For native documents, provide their accessible source links and version identifi
 From the public collection checkout, install all skills and the reviewer:
 
 ```bash
-uv run --script install-skills
+./install-skills
 ```
 
 Run this command from the `agentSkills` checkout.

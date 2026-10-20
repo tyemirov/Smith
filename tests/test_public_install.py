@@ -8,14 +8,13 @@ import subprocess
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-UV = shutil.which("uv")
 
 
 @pytest.fixture
 def public_export(tmp_path: Path) -> Path:
     exported = tmp_path / "public-export"
     exported.mkdir()
-    shutil.copyfile(ROOT / "install-skills", exported / "install-skills")
+    shutil.copy2(ROOT / "install-skills", exported / "install-skills")
     for source in ROOT.iterdir():
         if source.is_dir() and (source / "SKILL.md").is_file():
             shutil.copytree(source, exported / source.name)
@@ -29,7 +28,7 @@ def install(tmp_path: Path, exported: Path, *options: str) -> subprocess.Complet
     if not codex.exists():
         codex.symlink_to("/usr/bin/true")
     return subprocess.run(
-        [UV, "run", "--script", str(exported / "install-skills"),
+        [str(exported / "install-skills"),
          "--target", "codex", "--target", "bin", "--codex-home", str(tmp_path / "profile"),
          "--bin-dir", str(tmp_path / "bin"), *options],
         env={**os.environ, "PATH": str(commands) + os.pathsep + os.environ["PATH"]},

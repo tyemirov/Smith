@@ -57,7 +57,7 @@ cd agentSkills
 Install all skills, shared roles, and bundled Codex reviewers with one command:
 
 ```bash
-uv run --script install-skills
+./install-skills
 ```
 
 The command requires no private repository access.
@@ -141,7 +141,7 @@ See [Whip](whip/README.md) for the method, examples, and reviewer setup.
 Install all public skills and bundled Codex reviewers from this checkout:
 
 ```bash
-uv run --script install-skills
+./install-skills
 ```
 
 The public installer preserves existing skill links, unrelated skills, and controller model settings.

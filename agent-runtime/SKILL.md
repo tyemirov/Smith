@@ -20,7 +20,7 @@ Apply the task skill's authorization and validation gates.
 For installation details, read [Agent orchestration](references/orchestration.md).
 For model changes, host changes, or retirement, read [Lifecycle policy](references/lifecycle.md).
 
-From the collection root, run `uv run --script install-skills` to install the skills and their runtime dependency.
+From the collection root, run `./install-skills` to install the skills and their runtime dependency.
 Use `--dry-run` to preview changes or `--check` to verify the installation.
 The installer preserves existing controller model settings.
 It rejects conflicts with edited role files before it writes profile changes.
