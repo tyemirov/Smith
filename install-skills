@@ -1,0 +1,1107 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["PyYAML>=6,<7", "tomli-w>=1,<2"]
+# ///
+"""Install skill collections into local agent skill directories."""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import json
+import re
+import tempfile
+import difflib
+import hashlib
+import importlib.util
+import sys
+
+import yaml
+import os
+import shlex
+import shutil
+import subprocess
+import tomllib
+import tomli_w
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Callable
+
+
+SUPPORTED_TARGETS = ("codex", "claude", "opencode", "antigravity", "muse", "bin")
+SKILL_TARGETS = frozenset(SUPPORTED_TARGETS) - {"bin"}
+INSTALL_METADATA = Path("agents/install.toml")
+DEPLOYMENT_AGENTS = {"openai": "codex", "claude": "claude", "opencode": "opencode", "antigravity": "antigravity", "muse": "muse"}
+DEPLOYMENT_WILDCARDS = frozenset({"all", "*"})
+RUNTIME_FILE = Path("agents/runtime.yaml")
+GOVERNANCE_ID = "mprlab-governor"
+CONFIG_KEYS = frozenset({"model", "model_reasoning_effort"})
+CODEX_AGENT_REQUIRED = frozenset({"name", "description", "developer_instructions"})
+CODEX_AGENT_OPTIONAL = CONFIG_KEYS | {"sandbox_mode"}
+CODEX_AGENT_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"})
+CODEX_AGENT_SANDBOXES = frozenset({"read-only", "workspace-write", "danger-full-access"})
+
+CLI_TOOLS: tuple[tuple[str, Path], ...] = (
+    ("check-ste", Path("mprlab-governor/scripts/check-ste")),
+    ("prepare-ste-reference", Path("mprlab-governor/scripts/prepare-ste-reference")),
+    ("normalize-mprlab", Path("mprlab-governor/scripts/normalize-mprlab")),
+)
+
+
+@dataclass
+class BackupState:
+    root: Path | None = None
+
+
+@dataclass(frozen=True)
+class InstallResult:
+    linked: int = 0
+    skipped: int = 0
+
+
+@dataclass(frozen=True)
+class BackendSpec:
+    binary: str
+    command: tuple[str, ...]
+    server_name: str | None
+    server_config: dict[str, object]
+
+
+@dataclass(frozen=True)
+class RuntimeSpec:
+    module: object
+    contract: object
+
+
+@dataclass(frozen=True)
+class FileUpdate:
+    path: Path
+    before: bytes | None
+    after: bytes | None
+
+
+@dataclass(frozen=True)
+class SkillSource:
+    directory: Path
+    targets: frozenset[str]
+    backend: BackendSpec | None = None
+    runtime: RuntimeSpec | None = None
+    workflow: Path | None = None
+    reviewers: tuple[Path, ...] = ()
+
+
+def parse_args() -> argparse.Namespace:
+    home = Path.home()
+    parser = argparse.ArgumentParser(
+        description=(
+            "Symlink the custom skills in this repository into selected local "
+            "agent skill directories."
+        )
+    )
+    parser.add_argument("--source", action="append", type=Path, help="Skill source directory. Repeat for multiple collections. Defaults to this repository.")
+    parser.add_argument(
+        "--target",
+        action="append",
+        choices=SUPPORTED_TARGETS,
+        help="Install only this target. Repeat the option to select multiple targets. Defaults to agents installed on PATH.",
+    )
+    parser.add_argument(
+        "--skill", action="append",
+        help="Install only this skill directory. Repeat to select multiple skills. Defaults to all skills.",
+    )
+    parser.add_argument("--codex-home", type=Path, default=Path(os.environ.get("CODEX_HOME", home / ".codex")))
+    parser.add_argument("--claude-home", type=Path, default=Path(os.environ.get("CLAUDE_HOME", home / ".claude")))
+    parser.add_argument("--muse-home", type=Path, default=Path(os.environ.get("XDG_CONFIG_HOME", home / ".config")) / "muse")
+    parser.add_argument(
+        "--opencode-config-dir",
+        type=Path,
+        default=Path(
+            os.environ.get(
+                "OPENCODE_CONFIG_DIR",
+                Path(os.environ.get("XDG_CONFIG_HOME", home / ".config")) / "opencode",
+            )
+        ),
+        help="Override the OpenCode config directory. Defaults to $OPENCODE_CONFIG_DIR or ~/.config/opencode.",
+    )
+    parser.add_argument(
+        "--antigravity-home",
+        type=Path,
+        default=Path(os.environ.get("ANTIGRAVITY_HOME", home / ".gemini")),
+    )
+    parser.add_argument(
+        "--bin-dir",
+        type=Path,
+        default=Path(os.environ.get("BIN_DIR", home / ".local" / "bin")),
+        help="Directory for executable CLI tool symlinks. Defaults to $BIN_DIR or ~/.local/bin.",
+    )
+    operation = parser.add_mutually_exclusive_group()
+    operation.add_argument("--dry-run", action="store_true", help="Show what would change without modifying the filesystem.")
+    operation.add_argument("--check", action="store_true", help="Check installed links and governance outputs without writes or builds.")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace existing skill paths after moving them into a backup directory.",
+    )
+    return parser.parse_args()
+
+
+def log(message: str = "") -> None:
+    print(message)
+
+
+def status_text(real_text: str, dry_run_text: str, dry_run: bool) -> str:
+    return dry_run_text if dry_run else real_text
+
+
+def run_or_report(command: str, dry_run: bool, action: Callable[[], None]) -> None:
+    if dry_run:
+        log(f"[dry-run] {command}")
+        return
+    action()
+
+
+def canonical_path(path: Path) -> Path:
+    return path.resolve()
+
+
+def resolved_link_target(path: Path) -> Path:
+    target = path.readlink()
+    if not target.is_absolute():
+        target = path.parent / target
+    return target.resolve(strict=False)
+
+
+def skill_name_from_frontmatter(skill_md: Path) -> str | None:
+    in_frontmatter = False
+    for line in skill_md.read_text(encoding="utf-8").splitlines():
+        if line.strip() == "---":
+            if in_frontmatter:
+                return None
+            in_frontmatter = True
+            continue
+        if in_frontmatter and line.startswith("name:"):
+            return line.split(":", 1)[1].strip().strip('"') or None
+    return None
+
+
+def slug_from_name(name: str) -> str:
+    return name.lower().replace(" ", "-")
+
+
+def discover_skill_dirs(repo_root: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in repo_root.iterdir()
+        if path.is_dir() and not path.name.startswith(".") and (path / "SKILL.md").is_file()
+    )
+
+
+def read_skill_source(directory: Path) -> SkillSource:
+    skill_path = directory / "SKILL.md"
+    try:
+        text = skill_path.read_text(encoding="utf-8")
+        if not text.startswith("---\n") or "\n---\n" not in text[4:]:
+            raise ValueError("missing YAML header")
+        header = yaml.safe_load(text[4:].partition("\n---\n")[0])
+        deployment = header.get("deployment") if isinstance(header, dict) else None
+        if not isinstance(deployment, dict) or set(deployment) not in ({"include"}, {"exclude"}):
+            raise ValueError("deployment must contain exactly one of include or exclude")
+        mode, names = next(iter(deployment.items()))
+        if (not isinstance(names, list) or not names
+                or any(not isinstance(name, str) for name in names)
+                or len(names) != len(set(names))):
+            raise ValueError("deployment requires a nonempty list of distinct agent names")
+        if mode == "include" and len(names) == 1 and names[0] in DEPLOYMENT_WILDCARDS:
+            targets = SKILL_TARGETS
+        else:
+            if not set(names) <= DEPLOYMENT_AGENTS.keys():
+                raise ValueError("deployment requires specific supported agents; include also accepts all or '*' alone")
+            selected = frozenset(DEPLOYMENT_AGENTS[name] for name in names)
+            targets = selected if mode == "include" else SKILL_TARGETS - selected
+        metadata = header.get("metadata", {})
+        if not isinstance(metadata, dict):
+            raise ValueError("metadata must be a mapping")
+        if {"agent-affinity", "agent-targets"} & metadata.keys():
+            raise ValueError("declare agent selection only in deployment")
+        if "muse-model" in metadata:
+            raise ValueError("declare models only in the shared governance runtime")
+    except (OSError, ValueError, yaml.YAMLError) as error:
+        raise SystemExit(f"Invalid deployment in {skill_path}: {error}") from error
+
+    backend = read_backend(directory / INSTALL_METADATA, targets)
+    runtime = read_runtime(directory, targets)
+    workflow = directory / RUNTIME_FILE if runtime is None and (directory / RUNTIME_FILE).exists() else None
+    return SkillSource(directory, frozenset(targets), backend, runtime, workflow, read_reviewers(directory))
+
+
+def read_reviewers(directory: Path) -> tuple[Path, ...]:
+    agents = directory / "codex/agents"
+    if not agents.exists():
+        return ()
+    try:
+        if not agents.is_dir() or not agents.resolve().is_relative_to(directory.resolve()):
+            raise ValueError("custom agent directory must stay inside the skill")
+        paths = tuple(sorted(agents.glob("*.toml")))
+        for path in paths:
+            if not path.is_file() or not path.resolve().is_relative_to(directory.resolve()):
+                raise ValueError(f"custom agent must be a file inside the skill: {path}")
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+            if not CODEX_AGENT_REQUIRED <= data.keys() or data.keys() - CODEX_AGENT_REQUIRED - CODEX_AGENT_OPTIONAL:
+                raise ValueError(f"custom agent requires name, description, developer_instructions and supported Codex fields: {path}")
+            if any(not isinstance(value, str) or not value.strip() for value in data.values()):
+                raise ValueError(f"custom agent fields must be nonempty strings: {path}")
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", path.stem) or data["name"] != path.stem:
+                raise ValueError(f"custom agent name must match its filename: {path}")
+            if "model_reasoning_effort" in data and data["model_reasoning_effort"] not in CODEX_AGENT_EFFORTS:
+                raise ValueError(f"unsupported custom agent reasoning effort: {path}")
+            if "sandbox_mode" in data and data["sandbox_mode"] not in CODEX_AGENT_SANDBOXES:
+                raise ValueError(f"unsupported custom agent sandbox mode: {path}")
+        return paths
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"Invalid custom agents in {agents}: {error}") from error
+
+
+def reviewer_links(skills: list[SkillSource], roots: dict[str, Path], updates: list[FileUpdate]) -> list[tuple[str, Path, bool]]:
+    root = roots.get("codex")
+    if root is None or not any(skill.reviewers for skill in skills if "codex" in skill.targets):
+        return []
+    agents = root / "agents"
+    if not agents.resolve().is_relative_to(root.resolve()):
+        raise SystemExit(f"Conflict (Codex agents): destination directory escapes the profile: {agents}")
+    if (agents.exists() or agents.is_symlink()) and not agents.is_dir():
+        raise SystemExit(f"Conflict (Codex agents): destination must be a directory: {agents}")
+    owned = {update.path for update in updates}
+    try:
+        for receipt in sorted((root / ".governance").glob("*.json")):
+            data = json.loads(receipt.read_text())
+            if not isinstance(data, dict) or not isinstance(data.get("files"), dict):
+                raise ValueError(f"invalid governance receipt: {receipt}")
+            owned.update(root / relative for relative in data["files"])
+    except (OSError, ValueError, TypeError) as error:
+        raise SystemExit(f"Cannot inspect custom agent ownership: {error}") from error
+    sources: list[tuple[str, Path, bool]] = []
+    for skill in skills:
+        if "codex" not in skill.targets:
+            continue
+        for source in skill.reviewers:
+            target = root / "agents" / source.name
+            if target in owned:
+                raise SystemExit(f"Conflicting custom agent ownership: {target}")
+            owned.add(target)
+            sources.append((source.name, source, False))
+    return sources
+
+
+def identical_reviewer(target: Path, source: Path) -> bool:
+    return target.is_file() and target.read_bytes() == source.read_bytes()
+
+
+def preflight_reviewers(sources: list[tuple[str, Path, bool]], root: Path, force: bool) -> None:
+    for name, source, _ in sources:
+        target = root / "agents" / name
+        if not identical_reviewer(target, source) and (target.exists() or target.is_symlink()) and not force:
+            raise SystemExit(f"Conflict (Codex agent): {target}; use --force to back up the existing agent")
+
+
+def read_backend(path: Path, targets: frozenset[str]) -> BackendSpec | None:
+    if not path.exists():
+        return None
+    try:
+        config = tomllib.loads(path.read_text(encoding="utf-8"))
+        config.pop("runtime", None)
+        if not config:
+            return None
+        if set(config) not in ({"build"}, {"build", "openai"}) or "codex" not in targets:
+            raise ValueError("expected build and optional openai tables for an OpenAI-compatible skill")
+        build = config["build"]
+        if not isinstance(build, dict) or set(build) != {"binary", "command"}:
+            raise ValueError("build requires binary and command")
+        binary, command = build["binary"], build["command"]
+        if not isinstance(binary, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", binary):
+            raise ValueError("build.binary must be a filename")
+        if (not isinstance(command, list) or not command
+                or any(not isinstance(value, str) or not value for value in command)):
+            raise ValueError("build.command requires a nonempty string list")
+        values = {"binary": binary, "codex_home": "profile"}
+        for value in command:
+            value.format_map(values)
+        server_name = None
+        server_config: dict[str, object] = {}
+        if "openai" in config:
+            adapter = config["openai"]
+            if not isinstance(adapter, dict) or set(adapter) != {"mcp"}:
+                raise ValueError("openai requires an mcp table")
+            mcp = adapter["mcp"]
+            if not isinstance(mcp, dict) or not {"name", "args"} <= set(mcp) or set(mcp) - {"name", "args", "env", "env_vars", "tools"}:
+                raise ValueError("mcp requires name and args with optional env, env_vars, and tools")
+            server_name = mcp["name"]
+            if not isinstance(server_name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", server_name):
+                raise ValueError("mcp.name must be an identifier")
+            for key in ("args", "env_vars"):
+                items = mcp.get(key, [])
+                if not isinstance(items, list) or any(not isinstance(item, str) for item in items):
+                    raise ValueError(f"mcp.{key} must be a string list")
+            environment = mcp.get("env", {})
+            if not isinstance(environment, dict) or any(not isinstance(value, str) for value in environment.values()):
+                raise ValueError("mcp.env must contain string values")
+            for value in [*mcp["args"], *environment.values()]:
+                value.format_map(values)
+            tools = mcp.get("tools", {})
+            if not isinstance(tools, dict) or any(
+                not isinstance(rule, dict) or rule != {"approval_mode": "prompt"} for rule in tools.values()
+            ):
+                raise ValueError("each declared MCP tool requires approval_mode = prompt")
+            server_config = {key: value for key, value in mcp.items() if key != "name"}
+        return BackendSpec(binary, tuple(command), server_name, server_config)
+    except (OSError, ValueError, KeyError) as error:
+        raise SystemExit(f"Invalid {path}: {error}") from error
+
+
+def package_path(directory: Path, value: object) -> Path:
+    if not isinstance(value, str) or not value or Path(value).is_absolute():
+        raise ValueError("runtime paths must be relative to the skill")
+    path = (directory / value).resolve()
+    if not path.is_relative_to(directory.resolve()) or not path.is_file():
+        raise ValueError(f"runtime resource is missing or outside the skill: {value}")
+    return path
+
+
+def read_runtime(directory: Path, targets: frozenset[str]) -> RuntimeSpec | None:
+    path = directory / INSTALL_METADATA
+    if not path.exists():
+        return None
+    try:
+        metadata = tomllib.loads(path.read_text())
+        if "runtime" not in metadata:
+            return None
+        descriptor = metadata["runtime"]
+        if not isinstance(descriptor, dict) or not {"contract", "renderer"} <= descriptor.keys() or descriptor.keys() - {"contract", "renderer", "references"}:
+            raise ValueError("runtime requires contract and renderer")
+        references = descriptor.get("references", [])
+        if not isinstance(references, list):
+            raise ValueError("runtime.references requires a path list")
+        for reference in references:
+            package_path(directory, reference)
+        renderer = package_path(directory, descriptor["renderer"])
+        name = "smith_runtime_" + hashlib.sha256(str(renderer).encode()).hexdigest()
+        spec = importlib.util.spec_from_file_location(name, renderer)
+        if spec is None or spec.loader is None:
+            raise ValueError("cannot load the declared runtime renderer")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        contract = module.load(package_path(directory, descriptor["contract"]))
+        if not hasattr(contract, "hosts") or not callable(getattr(module, "render", None)):
+            raise ValueError("runtime installation requires a governance contract and renderer")
+        expected = {"openai" if target == "codex" else target for target in targets}
+        if not expected <= contract.hosts.keys():
+            raise ValueError("runtime hosts must cover the skill deployment targets")
+        return RuntimeSpec(module, contract)
+    except (OSError, ValueError, AttributeError, ImportError, TypeError) as error:
+        raise SystemExit(f"Invalid {path}: {error}") from error
+
+
+def installed_runtime(root: Path, identifier: str, target: str) -> RuntimeSpec | None:
+    receipt = root / ".governance" / f"{identifier}.json"
+    if not receipt.exists():
+        return None
+    try:
+        if receipt.is_symlink() or not receipt.resolve().is_relative_to(root.resolve()):
+            raise ValueError("receipt must stay inside its host root")
+        data = json.loads(receipt.read_text())
+        if not isinstance(data, dict) or set(data) != {"source", "files"} or not isinstance(data["files"], dict):
+            raise ValueError("invalid governance receipt fields")
+        runtime = read_runtime(Path(data["source"]), frozenset())
+        if runtime is None or runtime.contract.id != identifier:
+            raise ValueError("installed governance source is unavailable")
+        operations = runtime.module.render(runtime.contract, target)
+        expected = {operation["path"]: hashlib.sha256(operation["content"].encode()).hexdigest()
+                    for operation in operations if operation["kind"] == "file"}
+        if data["files"] != expected:
+            raise ValueError("shared source changed; reinstall Governor before this workflow")
+        for relative, digest in expected.items():
+            content = read_bytes(root / relative)
+            if content is None or hashlib.sha256(content).hexdigest() != digest:
+                raise ValueError("installed roles changed; reinstall Governor before this workflow")
+        for operation in operations:
+            update = reconcile_operation(root, operation, data["files"])
+            if update.before != update.after:
+                raise ValueError("shared bootstrap changed; reinstall Governor before this workflow")
+        return runtime
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        raise SystemExit(f"Invalid governance receipt {receipt}: {error}") from error
+
+
+def runtime_updates(skills: list[SkillSource], roots: dict[str, Path]) -> list[FileUpdate]:
+    updates: list[FileUpdate] = []
+    seen: set[Path] = set()
+    for target, root in roots.items():
+        runtimes = [skill for skill in skills if target in skill.targets and skill.runtime]
+        identifiers: set[str] = set()
+        for skill in runtimes:
+            runtime = skill.runtime
+            identifier = runtime.contract.id
+            if identifier in identifiers:
+                raise SystemExit(f"Conflicting governance sources for {identifier}")
+            identifiers.add(identifier)
+            receipt_path = root / ".governance" / f"{identifier}.json"
+            try:
+                if receipt_path.is_symlink() or not receipt_path.resolve().is_relative_to(root.resolve()):
+                    raise ValueError("receipt must stay inside its host root")
+                previous = json.loads(receipt_path.read_text()) if receipt_path.exists() else {"files": {}}
+                if not isinstance(previous, dict) or not isinstance(previous.get("files"), dict):
+                    raise ValueError("governance receipt requires file hashes")
+                managed: dict[str, str] = {}
+                operations = runtime.module.render(runtime.contract, target)
+                if not isinstance(operations, list):
+                    raise ValueError("renderer must return an operation list")
+                for operation in operations:
+                    update = reconcile_operation(root, operation, previous["files"])
+                    if operation["kind"] == "file":
+                        managed[operation["path"]] = hashlib.sha256(update.after).hexdigest()
+                    if update.path in seen:
+                        raise ValueError(f"multiple runtime operations own {update.path}")
+                    seen.add(update.path)
+                    updates.append(update)
+                obsolete = set(previous["files"]) - managed.keys()
+                if obsolete:
+                    raise ValueError(f"retired generated paths require explicit removal: {sorted(obsolete)}")
+                receipt = json.dumps({"source": str(skill.directory.resolve()), "files": managed}, indent=2, sort_keys=True) + "\n"
+                updates.append(FileUpdate(receipt_path, read_bytes(receipt_path), receipt.encode()))
+            except (ValueError, OSError, KeyError, TypeError) as error:
+                raise SystemExit(f"Cannot plan governance for {target}: {error}") from error
+        for skill in skills:
+            if target not in skill.targets or not skill.workflow:
+                continue
+            runtime = next((item.runtime for item in runtimes if item.runtime.contract.id == GOVERNANCE_ID), None)
+            if runtime is None:
+                runtime = installed_runtime(root, GOVERNANCE_ID, target)
+            if runtime is None:
+                raise SystemExit(f"Missing installed {GOVERNANCE_ID} dependency for {skill.directory.name} on {target}")
+            try:
+                workflow = runtime.module.load(skill.workflow)
+                if not hasattr(workflow, "governance") or workflow.governance != runtime.contract.id:
+                    raise ValueError("workflow must reference the installed governance contract")
+                if not workflow.roles <= runtime.contract.roles.keys():
+                    raise ValueError("workflow references undefined roles")
+            except ValueError as error:
+                raise SystemExit(str(error)) from error
+    return updates
+
+
+def read_bytes(path: Path) -> bytes | None:
+    return path.read_bytes() if path.exists() else None
+
+
+def reconcile_operation(root: Path, operation: object, owned: dict[str, str]) -> FileUpdate:
+    if not isinstance(operation, dict):
+        raise ValueError("renderer operations must be mappings")
+    kind = operation.get("kind")
+    fields = {"file": {"kind", "path", "content"},
+              "section": {"kind", "path", "marker", "content"},
+              "toml": {"kind", "path", "values"}}
+    if kind not in fields or set(operation) != fields[kind]:
+        raise ValueError("unsupported renderer operation or fields")
+    relative = operation["path"]
+    if not isinstance(relative, str) or not relative or Path(relative).is_absolute() or ".." in Path(relative).parts:
+        raise ValueError("generated paths must stay inside the host root")
+    path = root / relative
+    if not path.resolve().is_relative_to(root.resolve()) or path.is_symlink():
+        raise ValueError(f"generated path escapes its host root or is a symlink: {path}")
+    before = read_bytes(path)
+    if kind == "file":
+        if not isinstance(operation["content"], str):
+            raise ValueError("file content must be text")
+        after = operation["content"].encode()
+        if before is not None and before != after and hashlib.sha256(before).hexdigest() != owned.get(relative):
+            raise ValueError(f"Conflict: unowned or locally edited agent file {path}")
+    elif kind == "section":
+        marker = operation["marker"]
+        if marker != "MPRLAB-ORCHESTRATION" or not isinstance(operation["content"], str):
+            raise ValueError("unsupported managed instruction section")
+        begin, end = f"<!-- BEGIN {marker} -->", f"<!-- END {marker} -->"
+        text = before.decode() if before else ""
+        counts = (text.count(begin), text.count(end))
+        section = begin + "\n" + operation["content"].rstrip() + "\n" + end
+        if counts == (0, 0):
+            text += ("\n" if text.endswith("\n") else "\n\n" if text else "") + section + "\n"
+        elif counts == (1, 1) and text.index(begin) < text.index(end):
+            text = text[:text.index(begin)] + section + text[text.index(end) + len(end):]
+        else:
+            raise ValueError(f"invalid managed instruction markers in {path}")
+        after = text.encode()
+    else:
+        values = operation["values"]
+        if relative != "config.toml" or not isinstance(values, dict) or not values or not values.keys() <= CONFIG_KEYS:
+            raise ValueError("runtime config scope is limited to main model and reasoning effort")
+        if any(not isinstance(value, str) or not value for value in values.values()):
+            raise ValueError("runtime config values must be nonempty strings")
+        # Skill installation preserves controller preferences, including absent keys.
+        tomllib.loads(before.decode() if before else "")
+        after = before
+    return FileUpdate(path, before, after)
+
+
+def report_updates(updates: list[FileUpdate], preview: bool) -> bool:
+    changed = False
+    for update in updates:
+        if update.before == update.after:
+            continue
+        changed = True
+        log(f"Governance drift: {update.path}")
+        if preview:
+            log("".join(difflib.unified_diff(
+                (update.before or b"").decode().splitlines(keepends=True),
+                update.after.decode().splitlines(keepends=True),
+                fromfile=str(update.path), tofile=str(update.path), n=0)))
+    return changed
+
+
+def apply_updates(updates: list[FileUpdate], roots: dict[str, Path]) -> None:
+    changed = [update for update in updates if update.before != update.after]
+    if not changed:
+        return
+    from contextlib import ExitStack
+    with ExitStack() as locks:
+        for root in sorted(set(roots.values())):
+            root.mkdir(parents=True, exist_ok=True)
+            lock = locks.enter_context((root / ".skill-backend-install.lock").open("a"))
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        for update in changed:
+            if read_bytes(update.path) != update.before:
+                raise SystemExit(f"Configuration changed after preview: {update.path}")
+        applied: list[FileUpdate] = []
+        try:
+            for update in changed:
+                update.path.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write(update.path, update.after)
+                applied.append(update)
+        except OSError as error:
+            for update in reversed(applied):
+                if update.before is None:
+                    update.path.unlink()
+                else:
+                    atomic_write(update.path, update.before)
+            raise SystemExit(f"Governance installation failed and file changes were restored: {error}") from error
+
+
+def atomic_write(path: Path, content: bytes) -> None:
+    with tempfile.TemporaryDirectory(prefix=".governance-write-", dir=path.parent) as directory:
+        temporary = Path(directory) / path.name
+        temporary.write_bytes(content)
+        os.replace(temporary, path)
+
+
+def preflight_links(skills: list[SkillSource], roots: dict[str, Path], force: bool) -> None:
+    prefixes = {"codex": "skills", "claude": "commands", "opencode": "skills", "antigravity": "config/skills"}
+    for target, root in roots.items():
+        if target not in prefixes:
+            continue
+        names: set[str] = set()
+        for skill in skills:
+            if target not in skill.targets:
+                continue
+            name = skill.directory.name
+            source = skill.directory
+            if target == "claude":
+                raw_name = skill_name_from_frontmatter(source / "SKILL.md")
+                if not raw_name:
+                    raise SystemExit(f"Missing skill name: {source}")
+                name, source = slug_from_name(raw_name) + ".md", source / "SKILL.md"
+            if name in names:
+                raise SystemExit(f"Conflicting skill names for {target}: {name}")
+            names.add(name)
+            path = root / prefixes[target] / name
+            if path.is_symlink() and path.resolve() == source.resolve():
+                continue
+            if (path.exists() or path.is_symlink()) and not force:
+                raise SystemExit(f"Conflict ({target}): {path}; use --force to back up the existing skill")
+
+
+def preflight_muse(skills: list[SkillSource], root: Path, force: bool) -> None:
+    if root.name != "muse":
+        raise SystemExit("Muse home must end in muse because its CLI uses XDG_CONFIG_HOME/muse")
+    with tempfile.TemporaryDirectory(prefix="smith-muse-validate-") as temporary:
+        for skill in skills:
+            if "muse" not in skill.targets:
+                continue
+            package = Path(temporary) / skill.directory.name
+            prepare_muse_package(skill, package)
+            result = subprocess.run(["muse", "skills", "validate", str(package), "--json"], capture_output=True, text=True)
+            try:
+                valid = json.loads(result.stdout)
+                if result.returncode or not valid.get("valid") or valid.get("diagnostics"):
+                    raise ValueError(result.stdout + result.stderr)
+            except ValueError as error:
+                raise SystemExit(f"Muse validation failed for {skill.directory}: {error}") from error
+            target = root / "skills" / skill.directory.name
+            if target.is_symlink():
+                raise SystemExit(f"Conflict (Muse): package destination is a symlink: {target}")
+            if target.exists() and not force:
+                expected = {p.relative_to(package): p.read_bytes() for p in package.rglob("*") if p.is_file()}
+                actual = {p.relative_to(target): p.read_bytes() for p in target.rglob("*") if p.is_file()}
+                if expected != actual:
+                    raise SystemExit(f"Conflict (Muse): {target}; use --force to replace the package")
+
+
+def check_links(skills: list[SkillSource], roots: dict[str, Path]) -> bool:
+    drift = False
+    prefixes = {"codex": "skills", "claude": "commands", "opencode": "skills", "antigravity": "config/skills", "muse": "skills"}
+    for target, root in roots.items():
+        for skill in skills:
+            if target not in skill.targets:
+                continue
+            if target == "claude":
+                name = slug_from_name(skill_name_from_frontmatter(skill.directory / "SKILL.md")) + ".md"
+                expected = skill.directory / "SKILL.md"
+            else:
+                name, expected = skill.directory.name, skill.directory
+            path = root / prefixes[target] / name
+            if target == "muse":
+                if path.is_dir():
+                    expected_files = {relative: source.read_bytes() for source, relative in muse_package_files(skill.directory)}
+                    if Path("SKILL.md") in expected_files:
+                        text = expected_files[Path("SKILL.md")].decode()
+                        raw_name = skill_name_from_frontmatter(skill.directory / "SKILL.md")
+                        text = re.sub(r"(?m)^name:.*$", "name: " + skill.directory.name, text, count=1)
+                        if raw_name:
+                            text = text.replace(f"`${raw_name}`", f"`/{skill.directory.name}`")
+                        expected_files[Path("SKILL.md")] = text.encode()
+                    actual = {p.relative_to(path): p.read_bytes() for p in path.rglob("*") if p.is_file()}
+                    if expected_files == actual:
+                        continue
+            elif path.is_symlink() and path.resolve() == expected.resolve():
+                continue
+            log(f"Skill drift: {path}")
+            drift = True
+    return drift
+
+
+def run_command(command: list[str], dry_run: bool, *, cwd: Path | None = None) -> None:
+    if dry_run:
+        log(f"[dry-run] {shlex.join(command)}")
+        return
+    try:
+        subprocess.run(command, cwd=cwd, check=True)
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise SystemExit(f"Installation command failed: {shlex.join(command)}: {error}") from error
+
+
+def muse_package_files(directory: Path) -> list[tuple[Path, Path]]:
+    root = directory.parent
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--", "."],
+            capture_output=True, text=True, check=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise SystemExit(f"Cannot list package files for {directory}: {error}") from error
+    paths = [Path(path) for path in result.stdout.split("\0") if path]
+    tracked = set(paths)
+    if Path(directory.name) / "SKILL.md" not in tracked:
+        raise SystemExit(f"Skill source is not tracked by Git: {directory}")
+    files: list[tuple[Path, Path]] = []
+
+    def expand(source: Path, target: Path, ancestors: frozenset[Path]) -> None:
+        resolved = source.resolve()
+        if not resolved.is_relative_to(root):
+            raise SystemExit(f"Package file escapes source collection: {source}")
+        if resolved in ancestors:
+            raise SystemExit(f"Package dependency cycle: {source}")
+        if resolved.is_dir():
+            relative = resolved.relative_to(root)
+            children = [path for path in paths if path.is_relative_to(relative)]
+            if not children:
+                raise SystemExit(f"Package dependency has no tracked files: {source}")
+            for child in children:
+                expand(root / child, target / child.relative_to(relative), ancestors | {resolved})
+        else:
+            if resolved.relative_to(root) not in tracked:
+                raise SystemExit(f"Package dependency is not tracked by Git: {source}")
+            files.append((resolved, target))
+
+    expand(directory, Path(), frozenset())
+    # Include only explicitly declared runtime resources beyond tracked package files.
+    metadata_path = directory / INSTALL_METADATA
+    if metadata_path.exists():
+        descriptor = tomllib.loads(metadata_path.read_text()).get("runtime")
+        if descriptor:
+            resources = [str(INSTALL_METADATA), descriptor["contract"], descriptor["renderer"], *descriptor.get("references", [])]
+            by_destination = {relative: source for source, relative in files}
+            for resource in resources:
+                source = package_path(directory, resource)
+                by_destination[Path(resource)] = source
+            files = [(source, relative) for relative, source in sorted(by_destination.items())]
+    return files
+
+
+def prepare_muse_package(skill: SkillSource, destination: Path) -> None:
+    for source, relative in muse_package_files(skill.directory):
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        content = source.read_bytes()
+        if target.name == "SKILL.md" and target.parent == destination:
+            text = content.decode("utf-8")
+            original_name = skill_name_from_frontmatter(source)
+            text = re.sub(r"(?m)^name:.*$", "name: " + skill.directory.name, text, count=1)
+            if original_name:
+                text = text.replace(f"`${original_name}`", f"`/{skill.directory.name}`")
+            content = text.encode("utf-8")
+        target.write_bytes(content)
+
+
+def install_muse(skills: list[SkillSource], *, dry_run: bool, force: bool, root: Path) -> None:
+    selected = [skill for skill in skills if "muse" in skill.targets]
+    target_root = root / "skills"
+    if dry_run:
+        for skill in selected:
+            log(f"[dry-run] Muse: validate and install {skill.directory} -> {target_root / skill.directory.name}")
+        return
+    with tempfile.TemporaryDirectory(prefix="smith-muse-") as temporary:
+        packages: list[tuple[Path, Path]] = []
+        for skill in selected:
+            package = Path(temporary) / skill.directory.name
+            prepare_muse_package(skill, package)
+            validation = subprocess.run(["muse", "skills", "validate", str(package), "--json"], capture_output=True, text=True)
+            if validation.returncode:
+                raise SystemExit(f"Muse validation failed for {skill.directory}: {validation.stdout}{validation.stderr}")
+            result = json.loads(validation.stdout)
+            if not result.get("valid") or result.get("diagnostics"):
+                raise SystemExit(f"Muse validation failed for {skill.directory}: {validation.stdout}")
+            target = target_root / skill.directory.name
+            if target.exists():
+                expected = {p.relative_to(package): p.read_bytes() for p in package.rglob("*") if p.is_file()}
+                actual = {p.relative_to(target): p.read_bytes() for p in target.rglob("*") if p.is_file()}
+                if expected == actual:
+                    log(f"Already installed (Muse): {skill.directory.name}")
+                    continue
+                if not force:
+                    raise SystemExit(f"Conflict (Muse): {target}; use --force to replace the package")
+            packages.append((package, target))
+        for package, target in packages:
+            command = ["muse", "skills", "install", str(package), "--scope", "user", "--json"]
+            if target.exists():
+                command.append("--force")
+            result = subprocess.run(command, capture_output=True, text=True,
+                                    env={**os.environ, "XDG_CONFIG_HOME": str(root.parent)})
+            if result.returncode:
+                raise SystemExit(f"Muse installation failed for {package.name}: {result.stdout}{result.stderr}")
+            log(f"Installed (Muse): {package.name} -> {target}")
+        excluded = [skill.directory.name for skill in skills if "muse" not in skill.targets]
+        if excluded:
+            catalog = subprocess.run(["muse", "skills", "list", "--json"], capture_output=True, text=True, check=True, env={**os.environ, "XDG_CONFIG_HOME": str(root.parent)})
+            current = {entry["id"]: entry for entry in json.loads(catalog.stdout)["skills"]}
+            for name in excluded:
+                if name in current and current[name]["activation"] != "off":
+                    subprocess.run(["muse", "skills", "disable", name, "--scope", "user", "--json"], check=True, capture_output=True, env={**os.environ, "XDG_CONFIG_HOME": str(root.parent)})
+                    log(f"Disabled (Muse affinity): {name}")
+
+
+def directory_sources(skills: list[SkillSource], target: str) -> list[tuple[str, Path, bool]]:
+    return [(skill.directory.name, skill.directory, True) for skill in skills if target in skill.targets]
+
+
+def install_backend(skill: SkillSource, backend: BackendSpec, codex_home: Path, bin_dir: Path, dry_run: bool) -> None:
+    profile, binary_root = codex_home.resolve(), bin_dir.resolve()
+    binary = binary_root / backend.binary
+    values = {"binary": str(binary), "codex_home": str(profile)}
+    command = [value.format_map(values) for value in backend.command]
+    if dry_run:
+        log(f"[dry-run] Build ({skill.directory.name}) in {skill.directory}: {shlex.join(command)}")
+        if backend.server_name:
+            log(f"[dry-run] Register MCP server {backend.server_name} in {profile / 'config.toml'}")
+        return
+    profile.mkdir(parents=True, exist_ok=True)
+    binary_root.mkdir(parents=True, exist_ok=True)
+    # Serialize installers for this profile while retaining existing user configuration.
+    with (profile / ".skill-backend-install.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        config_path = profile / "config.toml"
+        text = config_path.read_text() if config_path.exists() else ""
+        try:
+            config = tomllib.loads(text)
+            servers = config.get("mcp_servers", {})
+            if not isinstance(servers, dict):
+                raise ValueError("mcp_servers must be a table")
+        except ValueError as error:
+            raise SystemExit(f"Invalid Codex configuration {config_path}: {error}") from error
+        with tempfile.TemporaryDirectory(prefix=".skill-build-", dir=binary_root) as staging:
+            built = Path(staging) / backend.binary
+            build_values = {**values, "binary": str(built)}
+            command = [value.format_map(build_values) for value in backend.command]
+            try:
+                subprocess.run(command, cwd=skill.directory, check=True)
+                if not built.is_file():
+                    raise ValueError("build did not produce the declared binary")
+                os.replace(built, binary)
+            except (OSError, ValueError, subprocess.CalledProcessError) as error:
+                raise SystemExit(f"Build failed for {skill.directory.name}: {error}") from error
+        log(f"Built backend: {binary}")
+        if not backend.server_name or backend.server_name in servers:
+            return
+        server = {**backend.server_config, "command": str(binary)}
+        server["args"] = [value.format_map(values) for value in server["args"]]
+        if "env" in server:
+            server["env"] = {key: value.format_map(values) for key, value in server["env"].items()}
+        entry = tomli_w.dumps({"mcp_servers": {backend.server_name: server}})
+        with tempfile.TemporaryDirectory(prefix=".skill-config-", dir=profile) as staging:
+            updated = Path(staging) / "config.toml"
+            updated.write_text(text + "\n" + entry)
+            os.replace(updated, config_path)
+        log(f"Registered MCP server: {backend.server_name}")
+
+
+def ensure_dir(path: Path, dry_run: bool) -> None:
+    run_or_report(f"mkdir -p {path}", dry_run, lambda: path.mkdir(parents=True, exist_ok=True))
+
+
+def backup_path(path: Path, parent: Path, state: BackupState, dry_run: bool) -> None:
+    if state.root is None:
+        state.root = parent / f".custom-skills-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        ensure_dir(state.root, dry_run)
+    destination = state.root / path.name
+    run_or_report(f"mv {path} {destination}", dry_run, lambda: shutil.move(str(path), str(destination)))
+    log(f"{status_text('Moved existing path', 'Would move existing path', dry_run)} to {destination}")
+
+
+def link_path(source: Path, target: Path, *, is_directory: bool, dry_run: bool) -> None:
+    def action() -> None:
+        target.symlink_to(source, target_is_directory=is_directory)
+
+    run_or_report(f"ln -s {source} {target}", dry_run, action)
+
+
+def install_links(
+    label: str,
+    target_root: Path,
+    sources: list[tuple[str, Path, bool]],
+    *,
+    dry_run: bool,
+    force: bool,
+    append_md: bool = False,
+) -> InstallResult:
+    ensure_dir(target_root, dry_run)
+    state = BackupState()
+    linked = 0
+    skipped = 0
+
+    for display_name, source, is_directory in sources:
+        target = target_root / (f"{display_name}.md" if append_md else display_name)
+        source_path = canonical_path(source)
+
+        if target.is_symlink():
+            current_target = resolved_link_target(target)
+            if current_target.exists():
+                current_target = canonical_path(current_target)
+            if current_target == source_path:
+                log(f"Already linked ({label}): {display_name}")
+                skipped += 1
+                continue
+            if not force:
+                raise SystemExit(
+                    f"Conflict ({label}): {target} points to {current_target}\n"
+                    "Re-run with --force to replace it."
+                )
+            backup_path(target, target_root, state, dry_run)
+        elif target.exists():
+            if not force:
+                raise SystemExit(
+                    f"Conflict ({label}): {target} already exists\n"
+                    "Re-run with --force to move it aside into a backup directory."
+                )
+            backup_path(target, target_root, state, dry_run)
+
+        link_path(source_path, target, is_directory=is_directory, dry_run=dry_run)
+        prefix = f"Linked ({label})" if (is_directory or label != "Claude") else "Linked"
+        dry_prefix = f"Would link ({label})" if (is_directory or label != "Claude") else "Would link"
+        log(f"{status_text(prefix, dry_prefix, dry_run)}: {target} -> {source_path}")
+        linked += 1
+
+    log(f"{label}: {status_text('Linked', 'Would link', dry_run)} {linked} item(s); skipped {skipped}.")
+    if state.root is not None:
+        log(f"{status_text('Backup directory', 'Would use backup directory', dry_run)}: {state.root}")
+    return InstallResult(linked=linked, skipped=skipped)
+
+
+def runtime_dependencies(skills: list[SkillSource], available: list[Path]) -> list[SkillSource]:
+    if not any(skill.workflow for skill in skills):
+        return skills
+    providers: dict[str, SkillSource] = {}
+    selected = {skill.directory for skill in skills}
+    for directory in available:
+        metadata = directory / INSTALL_METADATA
+        if not metadata.exists():
+            continue
+        try:
+            descriptor = tomllib.loads(metadata.read_text())
+        except (OSError, ValueError) as error:
+            raise SystemExit(f"Invalid installation metadata {metadata}: {error}") from error
+        if "runtime" not in descriptor:
+            continue
+        provider = next((skill for skill in skills if skill.directory == directory), None)
+        if provider is None:
+            provider = read_skill_source(directory)
+        identifier = provider.runtime.contract.id
+        if identifier in providers:
+            raise SystemExit(f"Conflicting governance sources for {identifier}")
+        providers[identifier] = provider
+    provider = providers.get(GOVERNANCE_ID)
+    if provider is not None and provider.directory not in selected:
+        return [*skills, provider]
+    return skills
+
+
+def binary_sources(roots: list[Path]) -> list[tuple[str, Path, bool]]:
+    sources: list[tuple[str, Path, bool]] = []
+    for name, relative in CLI_TOOLS:
+        candidates = [root / relative for root in roots if (root / relative).is_file()]
+        if len(candidates) > 1:
+            raise SystemExit(f"Conflicting binary sources for {name}")
+        if candidates:
+            sources.append((name, candidates[0], False))
+    return sources
+
+
+def main() -> int:
+    args = parse_args()
+    repo_root = Path(__file__).resolve().parent
+    roots = list(dict.fromkeys(path.resolve() for path in (args.source or [repo_root])))
+    for root in roots:
+        if not root.is_dir():
+            raise SystemExit(f"Skill source is not a directory: {root}")
+    skill_dirs = [directory for root in roots for directory in discover_skill_dirs(root)]
+    available = skill_dirs
+    names = [directory.name for directory in skill_dirs]
+    if len(names) != len(set(names)):
+        raise SystemExit("Duplicate skill names across selected sources")
+    if args.skill:
+        selected = set(args.skill)
+        unknown = selected - {directory.name for directory in skill_dirs}
+        if unknown:
+            raise SystemExit(f"Unknown skill: {', '.join(sorted(unknown))}")
+        skill_dirs = [directory for directory in skill_dirs if directory.name in selected]
+    if not skill_dirs:
+        log(f"No skill directories found under {repo_root}")
+        return 1
+
+    # Validate source metadata before creating any installation paths.
+    skills = runtime_dependencies([read_skill_source(directory) for directory in skill_dirs], available)
+    binaries = binary_sources(roots)
+    installed = {target for target in SKILL_TARGETS if shutil.which(target)}
+    if args.target:
+        targets = set(args.target)
+        missing = targets - installed - {"bin"}
+        if missing:
+            raise SystemExit(f"Agent not installed on PATH: {', '.join(sorted(missing))}")
+    else:
+        targets = installed | ({"bin"} if installed and not args.skill else set())
+    if not targets:
+        log("No supported agents installed on PATH. No changes.")
+        return 0
+
+    codex_skills_dir = args.codex_home / "skills"
+    claude_commands_dir = args.claude_home / "commands"
+    opencode_skills_dir = args.opencode_config_dir / "skills"
+    antigravity_skills_dir = args.antigravity_home / "config" / "skills"
+
+    log(f"Sources: {', '.join(str(root) for root in roots)}")
+    log(f"Targets: {', '.join(target for target in SUPPORTED_TARGETS if target in targets)}")
+
+    host_roots = {name: path.resolve() for name, path in {
+        "codex": args.codex_home, "claude": args.claude_home,
+        "opencode": args.opencode_config_dir, "antigravity": args.antigravity_home,
+        "muse": args.muse_home,
+    }.items() if name in targets}
+    updates = runtime_updates(skills, host_roots)
+    reviewers = reviewer_links(skills, host_roots, updates)
+    drift = report_updates(updates, args.dry_run)
+    if args.check:
+        link_drift = check_links(skills, host_roots)
+        for name, source, _ in reviewers:
+            path = host_roots["codex"] / "agents" / name
+            if not identical_reviewer(path, source):
+                log(f"Custom agent drift: {path}")
+                link_drift = True
+        if "bin" in targets:
+            for name, source, _ in binaries:
+                link = args.bin_dir / name
+                if not link.is_symlink() or link.resolve() != source.resolve():
+                    log(f"Binary drift: {link}")
+                    link_drift = True
+        return int(link_drift or drift)
+    preflight_links(skills, host_roots, args.force)
+    if "codex" in host_roots:
+        preflight_reviewers(reviewers, host_roots["codex"], args.force)
+    if "muse" in targets and not args.dry_run:
+        preflight_muse(skills, args.muse_home, args.force)
+    if not args.dry_run:
+        apply_updates(updates, host_roots)
+
+    if "codex" in targets:
+        log(f"Codex home: {args.codex_home}")
+        log(f"Codex skills dir: {codex_skills_dir}")
+        install_links("Codex", codex_skills_dir, directory_sources(skills, "codex"), dry_run=args.dry_run, force=args.force)
+        pending_reviewers = [item for item in reviewers
+                             if not identical_reviewer(host_roots["codex"] / "agents" / item[0], item[1])]
+        if pending_reviewers:
+            install_links("Codex agents", host_roots["codex"] / "agents", pending_reviewers,
+                          dry_run=args.dry_run, force=args.force)
+        for skill in skills:
+            if "codex" in skill.targets and skill.backend:
+                install_backend(skill, skill.backend, args.codex_home, args.bin_dir, args.dry_run)
+
+    if "opencode" in targets:
+        log(f"OpenCode config dir: {args.opencode_config_dir}")
+        log(f"OpenCode skills dir: {opencode_skills_dir}")
+        install_links("OpenCode", opencode_skills_dir, directory_sources(skills, "opencode"), dry_run=args.dry_run, force=args.force)
+
+    if "antigravity" in targets:
+        log(f"Antigravity home: {args.antigravity_home}")
+        log(f"Antigravity skills dir: {antigravity_skills_dir}")
+        install_links(
+            "Antigravity",
+            antigravity_skills_dir,
+            directory_sources(skills, "antigravity"),
+            dry_run=args.dry_run,
+            force=args.force,
+        )
+
+    if "claude" in targets:
+        log(f"Claude commands dir: {claude_commands_dir}")
+        claude_sources: list[tuple[str, Path, bool]] = []
+        for skill in skills:
+            if "claude" not in skill.targets:
+                continue
+            skill_dir = skill.directory
+            skill_md = skill_dir / "SKILL.md"
+            raw_name = skill_name_from_frontmatter(skill_md)
+            if not raw_name:
+                log(f"Warning: no name in frontmatter of {skill_md}; skipping Claude command")
+                continue
+            claude_sources.append((slug_from_name(raw_name), skill_md, False))
+        install_links(
+            "Claude",
+            claude_commands_dir,
+            claude_sources,
+            dry_run=args.dry_run,
+            force=args.force,
+            append_md=True,
+        )
+
+    if "muse" in targets:
+        install_muse(skills, dry_run=args.dry_run, force=args.force, root=args.muse_home)
+
+    if "bin" in targets:
+        log(f"Bin dir: {args.bin_dir}")
+        if binaries:
+            install_links("Binaries", args.bin_dir, binaries, dry_run=args.dry_run, force=args.force)
+
+    log()
+    log("Done.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

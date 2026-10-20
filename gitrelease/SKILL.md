@@ -21,7 +21,7 @@ old lifecycle.
 ## Runtime Routing
 
 Read [agents/runtime.yaml](agents/runtime.yaml) and the installed `mprlab-governor` runtime contract before role selection.
-Resolve the shared contract through the host's governance receipt or the installed Governor skill.
+Resolve the shared contract through the host's governance receipt or the installed `agent-runtime` skill.
 Use the shared host bindings for every delegated role.
 Keep task authority and final reporting in the primary agent.
 Use the primary checkout for every step. Execute mutations in the primary agent unless a worker uses that same checkout.

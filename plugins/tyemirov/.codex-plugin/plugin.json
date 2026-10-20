@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Tyemirov",
     "shortDescription": "Personal Codex skill bundle",
-    "longDescription": "A personal Codex plugin bundle containing Email Cleanup, Git Commit, Git Release, Simp, Tidy Folder, and Whip skills.",
+    "longDescription": "A personal Codex plugin bundle containing Email Cleanup, Git Commit, Git Release, Simp, Tidy Folder, Whip, and Agent Runtime skills.",
     "developerName": "Tyemirov",
     "category": "Productivity",
     "capabilities": [

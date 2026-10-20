@@ -1,0 +1,98 @@
+kind: governance
+id: mprlab-governor
+maintenance: references/lifecycle.md
+instructions:
+  - Read the applicable repository instructions before work. Keep task authority with the primary agent.
+  - Use the host's native delegation tools. Use deterministic tools for file selection, schema checks, and retries with a known cause.
+  - Keep small tasks in the primary agent. Delegate bounded work when it gives useful evidence or reduces task time.
+  - Use the primary checkout. Create or use a separate Git worktree only when the user explicitly requests it in the current request.
+  - Keep one owner for each set of file edits. Give a worker a bounded scope and verify its changes before integration.
+  - Verify the assigned model and effort against the active host before delegation. Record the requested pair, agent identifier, and actual pair when available.
+  - An inherited assignment uses the host's current model. If an explicit assignment is unavailable, report it and obtain a supported assignment before that delegation.
+  - If native delegation is unavailable, record single-agent execution. Keep a required independent review pending until it can run or the user changes that requirement.
+  - Apply the task skill's authorization and validation gates. Keep deployment and publication under the primary agent's authority.
+checkpoints:
+  before_plan: Before a large plan that spans components or changes a shared contract, spawn the architect to review the proposed approach and assumptions.
+  repeated_error: When the same unexpected error recurs after a proposed fix, spawn the architect to review the evidence and failure hypothesis before another fix.
+  before_done: Before calling a long task done, spawn the architect to review the final changes, validation evidence, and unresolved risks. Resolve its findings before completion.
+roles:
+  explorer:
+    name: mpr-explorer
+    description: Read code and report relevant paths, behavior, and evidence.
+    access: read
+    instructions:
+      - Inspect the assigned paths. Return concise findings with evidence locations.
+      - Keep this role read-only, including shell commands. Return proposed changes to the primary agent.
+  worker:
+    name: mpr-worker
+    description: Implement bounded changes and run the relevant validation.
+    access: write
+    instructions:
+      - Edit only the assigned scope in the primary checkout. Preserve unrelated changes.
+      - Run the relevant repository checks. Report changes, outcomes, and remaining failures.
+  researcher:
+    name: mpr-researcher
+    description: Find current primary documentation and answer a bounded question.
+    access: read
+    instructions:
+      - Use current primary sources. Cite the supporting pages and distinguish evidence from inference.
+      - Keep this role read-only, including shell commands. Return findings to the primary agent.
+  architect:
+    name: mpr-architect
+    description: Review large plans, repeated errors, and long-task completion.
+    access: read
+    instructions:
+      - Review only the supplied plan, recurring failure, or completed work.
+      - Identify concrete gaps, unsupported assumptions, and missed validation. Return actionable findings or a clear result.
+      - Keep this role read-only, including shell commands. Leave implementation and final decisions to the primary agent.
+hosts:
+  openai:
+    adapter: codex
+    instructions_file: AGENTS.md
+    agents_dir: agents
+    controller: {model: gpt-6.1-sol, reasoning_effort: high}
+    roles:
+      explorer: {model: gpt-6-luna, reasoning_effort: medium}
+      worker: {model: gpt-6.1-sol, reasoning_effort: medium}
+      researcher: {model: gpt-6-luna, reasoning_effort: medium}
+      architect: {model: gpt-6-astra, reasoning_effort: high}
+  claude:
+    adapter: claude
+    instructions_file: CLAUDE.md
+    agents_dir: agents
+    controller: {model: inherit, reasoning_effort: inherit}
+    roles:
+      explorer: {model: inherit, reasoning_effort: medium}
+      worker: {model: inherit, reasoning_effort: medium}
+      researcher: {model: inherit, reasoning_effort: medium}
+      architect: {model: inherit, reasoning_effort: high}
+  opencode:
+    adapter: opencode
+    instructions_file: AGENTS.md
+    agents_dir: agents
+    controller: {model: inherit, reasoning_effort: inherit}
+    roles:
+      explorer: {model: inherit, reasoning_effort: inherit}
+      worker: {model: inherit, reasoning_effort: inherit}
+      researcher: {model: inherit, reasoning_effort: inherit}
+      architect: {model: inherit, reasoning_effort: inherit}
+  antigravity:
+    adapter: antigravity
+    instructions_file: GEMINI.md
+    agents_dir: config/agents
+    controller: {model: inherit, reasoning_effort: inherit}
+    roles:
+      explorer: {model: inherit, reasoning_effort: inherit}
+      worker: {model: inherit, reasoning_effort: inherit}
+      researcher: {model: inherit, reasoning_effort: inherit}
+      architect: {model: inherit, reasoning_effort: inherit}
+  muse:
+    adapter: agent_read
+    instructions_file: null
+    agents_dir: governance
+    controller: {model: inherit, reasoning_effort: inherit}
+    roles:
+      explorer: {model: inherit, reasoning_effort: medium}
+      worker: {model: inherit, reasoning_effort: medium}
+      researcher: {model: inherit, reasoning_effort: medium}
+      architect: {model: inherit, reasoning_effort: high}

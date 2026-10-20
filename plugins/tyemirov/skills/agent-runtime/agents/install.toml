@@ -1,0 +1,4 @@
+[runtime]
+contract = "agents/runtime.yaml"
+renderer = "agent_runtime.py"
+references = ["references/orchestration.md", "references/lifecycle.md"]

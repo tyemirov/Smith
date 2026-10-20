@@ -26,6 +26,7 @@ The installed skills appear under the `tyemirov` plugin namespace:
 - `tyemirov:simp`
 - `tyemirov:Tidy Folder`
 - `tyemirov:whip`
+- `tyemirov:agent-runtime`
 
 ## Local Development
 
@@ -44,11 +45,31 @@ Use `./sync-plugins.sh --help` for options such as `--plugin-parent`,
 
 ## Local installation
 
-Use the single installer in the Smith repository for both collections:
+The public repository contains the installer and required runtime dependency.
+Install Git, `uv`, and the agent CLI before installation.
+Clone the public repository once:
 
 ```bash
-../Smith/install-skills --source ../Smith --source .
+git clone https://github.com/tyemirov/Smith.git agentSkills
+cd agentSkills
 ```
+
+Install all skills, shared roles, and bundled Codex reviewers with one command:
+
+```bash
+uv run --script install-skills
+```
+
+The command requires no private repository access.
+Keep this checkout available because installed skills link to its files.
+Run the same command again to install new skills.
+Existing unrelated skills and controller model settings remain unchanged.
+A conflicting skill or edited role file stops installation before profile changes.
+
+Use `--target codex` to select Codex explicitly.
+Use `--skill whip` to select Whip and its reviewer.
+For workflows such as `gitcommit`, the installer adds `agent-runtime` automatically.
+Use `--check` to verify installed files without changes.
 
 The installer detects supported agent commands through `PATH`.
 It reads each skill's YAML affinity declaration before installation.
@@ -93,9 +114,9 @@ Declare exactly one of `include` or `exclude` with a nonempty list of distinct n
 Missing declarations, unknown agents, and invalid fields stop installation before target changes.
 Duplicate skill directory names across collections also stop installation.
 
-Governor owns the shared role assignments and host bindings.
+The public `agent-runtime` package owns shared role assignments and host bindings.
 Task `agents/runtime.yaml` files reference the installed `mprlab-governor` contract.
-Install Governor with these workflows through the shared Smith installer.
+The public installer includes this dependency with selected workflows.
 Use `--dry-run` for a preview and `--check` for a read-only drift check.
 
 `sync-plugins.sh` builds the checked-in Codex plugin package.
@@ -117,13 +138,13 @@ It does not install skills or register a marketplace.
 Whip preserves approved document content through baseline comparisons and independent review.
 See [Whip](whip/README.md) for the method, examples, and reviewer setup.
 
-With an updated shared Smith checkout, install both collections and bundled Codex reviewers in one command:
+Install all public skills and bundled Codex reviewers from this checkout:
 
 ```bash
-../Smith/install-skills --source ../Smith --source .
+uv run --script install-skills
 ```
 
-The shared installer preserves existing skill links, unrelated skills, and controller model settings.
+The public installer preserves existing skill links, unrelated skills, and controller model settings.
 It preserves identical reviewer files and stops before writes when reviewer contents conflict.
 Use `--dry-run` for a preview and `--check` for verification.
 The plugin bundle contains Whip, but its reviewer needs the setup described in the Whip README.

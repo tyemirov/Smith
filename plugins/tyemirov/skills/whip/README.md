@@ -95,14 +95,14 @@ For native documents, provide their accessible source links and version identifi
 
 ### Set up independent review
 
-For an existing Smith checkout, use its shared installer to install both collections and the reviewer:
+From the public collection checkout, install all skills and the reviewer:
 
 ```bash
-../Smith/install-skills --source ../Smith --source .
+uv run --script install-skills
 ```
 
 Run this command from the `agentSkills` checkout.
-Use the updated Smith installer that supports `codex/agents/*.toml`.
+The public repository includes the installer and its required dependencies.
 It preserves existing skill links, unrelated skills, and controller model settings.
 Identical reviewer files remain unchanged.
 A conflicting reviewer stops installation before profile changes.

@@ -15,7 +15,7 @@ deployment:
 - For file operations, require an explicit target folder and user authorization for the requested operation.
 - Before a file operation, read [agents/runtime.yaml](agents/runtime.yaml) for task roles and execution methods.
 - Read the installed `mprlab-governor` runtime contract for shared host bindings and architect checkpoints.
-- Resolve the shared source through the host's governance receipt or the installed Governor skill.
+- Resolve the shared source through the host's governance receipt or the installed `agent-runtime` skill.
 - For an execution plan, read the same routing file before you assign roles.
 - Resolve script paths relative to this skill directory. The examples below run from this directory.
 

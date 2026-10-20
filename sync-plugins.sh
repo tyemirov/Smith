@@ -161,6 +161,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 skill_specs="$(cat <<'EOF'
+agent-runtime
 email-cleanup
 gitcommit
 gitrelease
@@ -253,7 +254,7 @@ payload = {
         "shortDescription": "Personal Codex skill bundle",
         "longDescription": (
             "A personal Codex plugin bundle containing Email Cleanup, "
-            "Git Commit, Git Release, Simp, Tidy Folder, and Whip skills."
+            "Git Commit, Git Release, Simp, Tidy Folder, Whip, and Agent Runtime skills."
         ),
         "developerName": "Tyemirov",
         "category": category,
