@@ -255,7 +255,7 @@ payload = {
         "shortDescription": "Skills for code, documents, email, files, and museum photos",
         "longDescription": (
             "Smith includes Email Cleanup, "
-            "Git Commit, Git Release, Museum Catalog, Simp, Tidy Folder, Whip, and Agent Runtime skills."
+            "Git Commit, Git Release, Museum Catalog for macOS, Simp, Tidy Folder, Whip, and Agent Runtime skills."
         ),
         "developerName": "Tyemirov",
         "category": category,

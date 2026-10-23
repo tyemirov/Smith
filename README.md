@@ -10,7 +10,7 @@ Use them for code review, Git workflows, document regression checks, Gmail clean
 | [Email Cleanup](email-cleanup/README.md) | Review and sort a crowded Gmail mailbox while protecting important records and active conversations. | `tyemirov:Email Cleanup` | `/email-cleanup` |
 | [Git Commit](gitcommit/README.md) | Validate repository changes, generate a commit message, and commit or push when the work is ready. | `tyemirov:Git Commit` | `/git-commit` |
 | [Git Release](gitrelease/README.md) | Prepare and publish verified artifacts when a repository is ready for release. | `tyemirov:Git Release` | `/git-release` |
-| [Museum Catalog](museum-catalog/SKILL.md) | Identify museum artworks, add concise metadata in Apple Photos, and separate family, artwork, and architecture photos. | `tyemirov:museum-catalog` | `/museum-catalog` |
+| [Museum Catalog (macOS only)](museum-catalog/SKILL.md) | Identify museum artworks, add concise metadata in Apple Photos, and separate family, artwork, and architecture photos. | `tyemirov:museum-catalog` | `/museum-catalog` |
 | [Simp](simp/README.md) | Audit or simplify complex code while preserving current supported functionality. | `tyemirov:simp` | `/simp` |
 | [Tidy Folder](tidy-folder/README.md) | Organize cluttered folders by subject or project so files are easier to find. | `tyemirov:Tidy Folder` | `/tidy-folder` |
 | [Whip](whip/README.md) | Revise or restructure documents while preserving approved facts, decisions, and citations. | `tyemirov:whip` | `/whip` |
@@ -164,6 +164,8 @@ See Google's [skills](https://antigravity.google/docs/skills), [subagents](https
 
 ### Museum visits in Apple Photos
 
+**Platform: macOS only.**
+Run this skill on the Mac with the local Photos library.
 Use Museum Catalog to identify artwork from placards or visual comparisons.
 The artwork title goes in Photos Title.
 Artist, year, medium, and essential uncertainty go in the caption.

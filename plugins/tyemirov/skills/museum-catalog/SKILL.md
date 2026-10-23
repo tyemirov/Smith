@@ -1,12 +1,17 @@
 ---
 name: museum-catalog
-description: "Catalog museum visits in Apple Photos. Identify artworks from photographed labels or visual research. Save artwork metadata and organize visit photos."
+description: "Catalog museum visits in Apple Photos on macOS only. Identify artworks from photographed labels or visual research. Save artwork metadata and organize visit photos."
 deployment:
   include:
   - all
 ---
 
-# Museum photo catalog
+# Museum photo catalog (macOS only)
+
+**Platform: macOS only.**
+This workflow requires the local Apple Photos library and macOS automation.
+Local OCR uses Apple Vision and AppKit through Swift.
+Run the skill on the Mac that has access to the Photos library.
 
 Use Apple Photos as the catalog.
 The assistant identifies and verifies artworks.
