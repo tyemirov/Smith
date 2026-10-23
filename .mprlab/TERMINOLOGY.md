@@ -155,3 +155,16 @@ Add repository-specific technical verbs below this line.
 ```text
 - `term`: Definition with one meaning and the approved verb forms.
 ```
+
+## Agent Runtime Terms
+
+- `architect`: A read-only agent that reviews plans, repeated errors, and completed work.
+- `controller`: The primary agent that owns task authority and the final result.
+- `explorer`: A read-only agent that inspects code and returns evidence.
+- `host binding`: The model and effort assigned to a role on one coding host.
+- `orchestration`: The rules for role selection, delegation, and review checkpoints.
+- `researcher`: A read-only agent that retrieves primary documentation.
+- `runtime contract`: The declarative source for shared roles or task steps.
+- `runtime renderer`: The module that converts the shared contract into host configuration.
+- `governance receipt`: The installation record that identifies the shared source and generated file hashes.
+- `worker`: An agent that implements a bounded change and runs validation.
