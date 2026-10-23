@@ -1,0 +1,4 @@
+interface:
+  display_name: "Museum Photo Catalog (macOS)"
+  short_description: "Catalog Apple Photos museum visits on macOS only"
+  default_prompt: "Use $museum-catalog on this Mac to identify artworks, save concise artwork metadata, and organize this museum visit in Apple Photos."
