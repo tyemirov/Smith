@@ -14,6 +14,15 @@ Treat simplification as the optimization objective and the repository's current
 canonical contract as the constraint. Do not preserve accidental behavior,
 obsolete paths, or stale assertions merely because they are observable.
 
+## Compatibility and prerequisites
+
+- This package contains instructions, a reference checklist, and a report template.
+- Tool and OS requirements depend on the selected repository and agent host.
+- Use the repository's documented validation tools for the selected scope.
+- Network access and credentials are necessary only when those tools or evidence sources require them.
+- Parallel review uses independent subagents when the host supplies them.
+- Apply mode requires a fresh independent verifier before a candidate can pass its retention gates.
+
 ## Invocation
 
 Read the mode and scope from the user's instruction. A host may deliver that

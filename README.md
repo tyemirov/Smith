@@ -16,6 +16,24 @@ Use them for code review, Git workflows, document regression checks, Gmail clean
 | [Whip](whip/README.md) | Revise or restructure documents while preserving approved facts, decisions, and citations. | `tyemirov:whip` | `/whip` |
 | [Agent Runtime](agent-runtime/README.md) | Supply shared roles and host configuration when skills need delegation or independent review. | `tyemirov:agent-runtime` | `/agent-runtime` |
 
+## Compatibility and prerequisites
+
+Each skill documents its own tools, access, and optional features.
+The `compatibility` header declares specific environment requirements.
+The `deployment` header selects agent hosts. It does not select an operating system.
+These requirements come from the source. Platform execution evidence remains specific to each recorded test.
+
+| Skill | Bundled implementation | Main requirements and conditional features |
+|---|---|---|
+| [Agent Runtime](agent-runtime/SKILL.md#compatibility-and-prerequisites) | Python renderer | Python 3.10+, PyYAML, tomli-w. Role execution needs host-supported delegation. |
+| [Email Cleanup](email-cleanup/SKILL.md#compatibility-and-prerequisites) | Instructions | Authenticated Gmail connector and network. Label and Trash operations need mutation tools. |
+| [Git Commit](gitcommit/SKILL.md#compatibility-and-prerequisites) | Instructions and role contract | Git, configured `gix` provider, repository checks. Examples use Bash. Push needs remote authentication. |
+| [Git Release](gitrelease/SKILL.md#compatibility-and-prerequisites) | Bash and Python helpers | Bash 4.2+, Git, Make, `timeout`, `uv`, Python 3.10+. Container, Pages, and Go targets add tools. |
+| [Museum Catalog](museum-catalog/SKILL.md#compatibility-and-prerequisites) | Python, JXA, and Swift helpers | macOS only. Photos automation, Python 3.10+, `uv`, `osascript`, `sips`. OCR adds Swift and Apple frameworks. |
+| [Simp](simp/SKILL.md#compatibility-and-prerequisites) | Instructions | Repository-specific tools. Apply mode needs an independent verifier. |
+| [Tidy Folder](tidy-folder/SKILL.md#compatibility-and-prerequisites) | Python helpers | Python 3.10+, `uv`, declared scanner packages, and shebang execution. OCR, media, and vision add dependencies. `mdls` is macOS-specific. |
+| [Whip](whip/SKILL.md#compatibility-and-prerequisites) | Python text checkers | Python 3.10+, `uv`. Substantial revisions need independent review. Native documents need editor or API access. |
+
 ## Codex Plugin Marketplace
 
 This repository is a Codex plugin marketplace. GitHub discoverability comes
@@ -64,7 +82,10 @@ Use `./sync-plugins.sh --help` for options such as `--plugin-parent`,
 ## Local installation
 
 The public repository contains the installer and required runtime dependency.
-Install Git, `uv`, and the agent CLI before installation.
+Use a POSIX environment for the collection installer. It uses `fcntl` file locks.
+Install Git, `uv`, Python 3.11 or later, and the selected agent CLI before installation.
+The installer declares its PyYAML and tomli-w dependencies in inline metadata.
+`uv` can retrieve these packages when they are absent from its cache.
 Clone the public repository once:
 
 ```bash

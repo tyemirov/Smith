@@ -4,6 +4,8 @@ description: Shared role definitions and host configuration for skills that requ
 deployment:
   include:
   - all
+compatibility: >-
+  Role execution depends on the selected host and its native delegation tools. The renderer requires Python 3.10 or later, PyYAML, and tomli-w.
 ---
 
 # Agent Runtime
@@ -24,3 +26,12 @@ From the collection root, run `./install-skills` to install the skills and their
 Use `--dry-run` to preview changes or `--check` to verify the installation.
 The installer preserves existing controller model settings.
 It rejects conflicts with edited role files before it writes profile changes.
+
+## Compatibility and prerequisites
+
+- Instruction use depends on a host that can read this package and apply its role contract.
+- Role execution requires the selected host's native delegation tools and supported model assignments.
+- The Python renderer requires Python 3.10 or later, `PyYAML`, and `tomli-w`.
+- The renderer reads and formats local configuration data.
+- Model execution and authentication belong to the selected host.
+- Collection installation has separate requirements in the [collection guide](https://github.com/tyemirov/Smith#local-installation).

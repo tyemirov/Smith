@@ -4,11 +4,24 @@ description: "Turn the current Git worktree into a commit. Use when Codex should
 deployment:
   include:
   - all
+compatibility: >-
+  Requires Git, gix with a configured LLM provider, and the target repository validation tools. Shell examples use Bash. Push requires access to the selected Git remote.
 ---
 
 # Git Commit Skill
 
 Use `$Git Commit` when the user wants a diff-based commit message, a full-tree commit, and an optional push.
+
+## Compatibility and prerequisites
+
+- Provide `git`, `gix`, and the target repository's required validation tools.
+- Configure the LLM provider that `gix message commit` uses.
+- Provider authentication and network requirements depend on that configuration.
+- Configure the Git author identity and any repository-required hooks or signing tools.
+- The command examples use Bash syntax, `mktemp`, and `trap`.
+- Push requires authentication and network access to the selected remote.
+- Local commit creation does not require remote access.
+- This package contains instructions and a role contract, not a bundled commit implementation.
 
 ## Runtime Routing
 
