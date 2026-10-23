@@ -376,6 +376,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument('--allow-export', action='store_true', help='Export rendered edited JPEG copies for missing renders')
     p.add_argument('--size', type=int, default=1600)
     args = parser.parse_args(argv)
+    if sys.platform != 'darwin':
+        parser.error('Museum Catalog requires macOS with Apple Photos and Apple Vision.')
     if args.command == 'sources':
         write(args.out, photos_call({'op': 'sources'}))
     elif args.command == 'inventory':

@@ -114,7 +114,7 @@ class Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/'plan.json';m.write(path,plan)
             output=io.StringIO()
-            with patch.object(m,'apply_plan',return_value=result),contextlib.redirect_stdout(output):
+            with patch.object(m.sys,'platform','darwin'),patch.object(m,'apply_plan',return_value=result),contextlib.redirect_stdout(output):
                 m.main(['apply','--plan',str(path),'--apply','--log',str(Path(d)/'log')])
             printed=json.loads(output.getvalue())
             self.assertEqual(printed['status'],'partial')

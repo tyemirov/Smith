@@ -1,6 +1,9 @@
 ---
 name: museum-catalog
 description: "Catalog museum visits in Apple Photos on macOS only. Identify artworks from photographed labels or visual research. Save artwork metadata and organize visit photos."
+compatibility: >-
+  Requires macOS with Apple Photos, automation access,
+  Swift with Apple Vision, and uv.
 deployment:
   include:
   - all

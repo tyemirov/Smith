@@ -68,6 +68,8 @@ Keep unknown values empty.
 ## Run the helper
 
 Use macOS with Apple Photos, `osascript`, `sips`, Swift, and `uv`.
+The helper verifies macOS before a command reads visit files or starts native tools.
+Use `--help` on any platform to read the CLI usage.
 Select an absolute skill path and a separate private visit directory.
 Keep the visit directory outside the skill and its repository.
 Replace the example paths and source IDs with the user's selected values.
