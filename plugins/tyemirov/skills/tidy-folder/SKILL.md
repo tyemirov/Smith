@@ -5,9 +5,28 @@ description: |
 deployment:
   include:
   - all
+compatibility: >-
+  Bundled helpers require uv and Python 3.10 or later. The controller requires a host that can start the scanner through its uv shebang. OCR, media, and vision features have additional dependencies.
 ---
 
 # Tidy Folder
+
+## Compatibility and prerequisites
+
+- Provide `uv` and Python 3.10 or later for the bundled helpers.
+- The controller uses the standard library and starts the scanner through its `uv` shebang.
+- The scanner declares `mutagen>=1.47`, `openpyxl>=3.1`, `Pillow>=10.0`, and `pypdf>=5.0`.
+- Dependency retrieval can require network access when the packages are not cached.
+- macOS metadata extraction uses `mdls` only when that tool is available.
+- Other optional extractors are `file`, `strings`, `pdftotext`, `antiword`, `ffprobe`, `tesseract`, and `ffmpeg`.
+- OCR requires `tesseract` for the scanner's OCR feature.
+- Video frame extraction requires `ffmpeg`.
+- Local HF vision adds `transformers>=4.41`, `torch`, and `torchvision` through `uv`.
+- HF vision can require package and model downloads before local inference.
+- OpenAI vision requires `OPENAI_API_KEY`, API access, and authorization to send the selected content.
+- `OPENAI_VISION_MODEL` can select the API model.
+- Native tools and model dependencies have their own platform availability.
+- The evaluation fixture setup uses Bash.
 
 ## Select The Operation
 

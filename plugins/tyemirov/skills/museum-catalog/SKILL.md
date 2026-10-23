@@ -21,6 +21,18 @@ The assistant identifies and verifies artworks.
 The local helper reads the library, prepares previews, plans metadata changes, and verifies writes.
 The helper does not identify artworks automatically.
 
+## Compatibility and prerequisites
+
+- Provide Python 3.10 or later and `uv` for the helper.
+- The Python helper uses the standard library.
+- Photos operations require the local Apple Photos library and macOS automation access.
+- Native adapter commands use `osascript` with JavaScript for Automation.
+- Preview preparation uses `sips`.
+- Local OCR requires Swift with Apple Foundation, Vision, and AppKit.
+- Web research requires network access to the selected sources.
+- An iCloud export can require network access and the library account.
+- The helper's `--help` command remains available on other platforms.
+
 ## Private visit files
 
 Select a private directory outside this skill and its repository for each visit.

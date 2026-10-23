@@ -4,9 +4,20 @@ description: "Use when the user wants to clean up Gmail, reduce inbox volume, re
 deployment:
   include:
   - all
+compatibility: >-
+  Requires authenticated Gmail connector access and network access. Search and read tools support review. Label and Trash operations require corresponding mutation tools.
 ---
 
 # Email Cleanup
+
+## Compatibility and prerequisites
+
+- This package contains instructions, not a local script runtime.
+- Connect an authenticated Gmail account through the host's connector.
+- Provide network access for Gmail operations.
+- Search and read tools support mailbox review.
+- Label and Trash operations require the corresponding mutation tools.
+- OS availability depends on the host and connector, not on a bundled desktop adapter.
 
 ## When to use
 - Clean up a crowded Gmail inbox or long-neglected account.

@@ -4,11 +4,25 @@ deployment:
   include:
     - all
 description: Edit, reorganize, or comprehensively rewrite an existing document while preserving previously approved facts, decisions, arguments, citations, and untouched content. Use for iterative document revisions, major refactoring, consolidation, tracked editorial changes, and regression-sensitive editing. For one-off drafting from scratch, this skill is unnecessary.
+compatibility: >-
+  Text checks require uv and Python 3.10 or later. Substantial revisions require an independent subagent. Native documents require access through their editor or API.
 ---
 
 # Whip: preserve what is already correct
 
 Invoke this skill with `$whip`.
+
+## Compatibility and prerequisites
+
+- Text checks require `uv`, Python 3.10 or later, and the standard library.
+- Keep `check_revision.py` and `gate_review.py` together for their local import.
+- The text checkers have no native OS adapter or network client.
+- Substantial revisions require a fresh independent subagent.
+- Codex can use the bundled `whip_reviewer` definition.
+- Other hosts can use a separate subagent with the same review protocol.
+- When separate review is unavailable, the independent review status remains `PENDING`.
+- Native documents require access through the selected editor or provider API.
+- Cloud document access can require connector authentication and network access.
 
 ## Non-negotiable principle
 Treat the existing document as an artifact with accumulated requirements. An editing instruction authorizes only the requested changes. Never silently remove, invert, qualify, embellish, or reinterpret previously established meaning. A fluent rewritten document is not evidence of preservation.

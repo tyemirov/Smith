@@ -4,6 +4,8 @@ description: "Use when preparing or publishing a repository release under the st
 deployment:
   include:
   - all
+compatibility: >-
+  Bundled workflows require Bash 4.2 or later, Git, make, timeout, uv, and Python 3.10 or later. Publication and artifact operations require additional tools and destination access.
 ---
 
 # Git Release Skill
@@ -17,6 +19,25 @@ Use `$Git Release` for repositories that implement the canonical lifecycle:
 The phases are forward-only. Do not retain an end-to-end release alias, rebuild in
 publish, publish missing artifacts from deploy, or add a compatibility path for the
 old lifecycle.
+
+## Compatibility and prerequisites
+
+- Provide Bash 4.2 or later for the bundled shell workflows.
+- The scripts use Bash arrays, `mapfile`, `readarray`, and `[[ -v ... ]]`.
+- Provide Git, `make`, `timeout` with `-k` and `-s`, `uv`, and Python 3.10 or later.
+- The Python release helper uses the standard library.
+- Provide the repository's CI tools and declared artifact tools.
+- Build dependency retrieval can require network access during local artifact preparation.
+- GitHub publication requires authenticated `gh` access and Git remote access.
+- The helper's nonlocal `preflight` command also requires `gix`.
+- Container operations require Docker, a Docker daemon, Buildx, and `shasum`.
+- Container publication requires access to the selected registry.
+- GHCR publication uses the authenticated `gh` account.
+- Pages preparation requires `rsync` and `tar`.
+- Pages deployment also requires `shasum`, GitHub access, and Pages access.
+- Go module operations require Go with the version required by the selected module.
+- Go module deployment also requires `gh`, proxy access, and checksum service access.
+- Repository-specific store targets supply their own SDKs and authentication requirements.
 
 ## Runtime Routing
 
