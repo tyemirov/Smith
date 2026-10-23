@@ -1,0 +1,4 @@
+interface:
+  display_name: "Museum Photo Catalog"
+  short_description: "Catalog museum artwork and organize visit photos"
+  default_prompt: "Use $museum-catalog to identify artworks, save concise artwork metadata, and organize this museum visit in Apple Photos."

@@ -1,15 +1,15 @@
 {
   "name": "tyemirov",
   "version": "0.1.0",
-  "description": "Smith: seven agent skills for code review, Git workflows, document regression checks, Gmail cleanup, and file organization.",
+  "description": "Smith: eight agent skills for code review, Git workflows, document regression checks, Gmail cleanup, file organization, and museum photo catalogs.",
   "author": {
     "name": "Tyemirov"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Smith",
-    "shortDescription": "Skills for code, documents, email, and files",
-    "longDescription": "Smith includes Email Cleanup, Git Commit, Git Release, Simp, Tidy Folder, Whip, and Agent Runtime skills.",
+    "shortDescription": "Skills for code, documents, email, files, and museum photos",
+    "longDescription": "Smith includes Email Cleanup, Git Commit, Git Release, Museum Catalog, Simp, Tidy Folder, Whip, and Agent Runtime skills.",
     "developerName": "Tyemirov",
     "category": "Productivity",
     "capabilities": [
@@ -21,6 +21,7 @@
       "Use Tyemirov skills to clean up Gmail safely.",
       "Use Simp to audit a repository for forward-only simplifications.",
       "Use Tyemirov skills to organize a folder.",
+      "Use Museum Catalog to catalog a museum visit in Apple Photos.",
       "Use Whip to revise a document and verify that approved content is preserved."
     ]
   }

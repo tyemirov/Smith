@@ -1,7 +1,7 @@
 # Smith
 
-Smith provides seven agent skills for Codex, Claude Code, and Antigravity CLI.
-Use them for code review, Git workflows, document regression checks, Gmail cleanup, and file organization.
+Smith provides eight agent skills for Codex, Claude Code, and Antigravity CLI.
+Use them for code review, Git workflows, document regression checks, Gmail cleanup, file organization, and museum photo catalogs.
 
 ## Skills
 
@@ -10,6 +10,7 @@ Use them for code review, Git workflows, document regression checks, Gmail clean
 | [Email Cleanup](email-cleanup/README.md) | Review and sort a crowded Gmail mailbox while protecting important records and active conversations. | `tyemirov:Email Cleanup` | `/email-cleanup` |
 | [Git Commit](gitcommit/README.md) | Validate repository changes, generate a commit message, and commit or push when the work is ready. | `tyemirov:Git Commit` | `/git-commit` |
 | [Git Release](gitrelease/README.md) | Prepare and publish verified artifacts when a repository is ready for release. | `tyemirov:Git Release` | `/git-release` |
+| [Museum Catalog](museum-catalog/SKILL.md) | Identify museum artworks, add concise metadata in Apple Photos, and separate family, artwork, and architecture photos. | `tyemirov:museum-catalog` | `/museum-catalog` |
 | [Simp](simp/README.md) | Audit or simplify complex code while preserving current supported functionality. | `tyemirov:simp` | `/simp` |
 | [Tidy Folder](tidy-folder/README.md) | Organize cluttered folders by subject or project so files are easier to find. | `tyemirov:Tidy Folder` | `/tidy-folder` |
 | [Whip](whip/README.md) | Revise or restructure documents while preserving approved facts, decisions, and citations. | `tyemirov:whip` | `/whip` |
@@ -39,6 +40,7 @@ The installed skills appear under the `tyemirov` plugin namespace:
 - `tyemirov:Email Cleanup`
 - `tyemirov:Git Commit`
 - `tyemirov:Git Release`
+- `tyemirov:museum-catalog`
 - `tyemirov:simp`
 - `tyemirov:Tidy Folder`
 - `tyemirov:whip`
@@ -159,6 +161,19 @@ These role and rule locations are shared across Antigravity surfaces.
 See Google's [skills](https://antigravity.google/docs/skills), [subagents](https://antigravity.google/docs/subagents), and [rules](https://antigravity.google/docs/rules) documentation.
 
 ## Usage examples
+
+### Museum visits in Apple Photos
+
+Use Museum Catalog to identify artwork from placards or visual comparisons.
+The artwork title goes in Photos Title.
+Artist, year, medium, and essential uncertainty go in the caption.
+Family, artwork, and architecture photos have separate albums.
+
+Keep visit records and personal photos in a private directory outside this repository.
+The skill includes local Photos automation and Apple Vision OCR for macOS.
+The assistant verifies artwork details and organizes albums.
+The helper previews metadata changes before an explicit apply command.
+See [Museum Catalog](museum-catalog/SKILL.md) for the workflow and helper commands.
 
 ### Whip document revisions
 
